@@ -2,8 +2,7 @@
 __pycache__/
 *.py[cod]
 
-# Recorded clips and trained weights: yours, and too big for git.
-data/
+# Trained weights: yours, and too big for git.
 models/*.pt
 models/*.task
 !models/.gitkeep
