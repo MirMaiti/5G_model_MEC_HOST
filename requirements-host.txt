@@ -1,0 +1,8 @@
+# The capture host. Runs MediaPipe and speaks; needs no PyTorch.
+-r requirements-core.txt
+mediapipe>=0.10
+opencv-python>=4.8
+
+# Speech. On macOS the built-in `say` is used and needs nothing installed.
+# Uncomment for Linux/Windows, or to force a cross-platform engine:
+# pyttsx3>=2.90

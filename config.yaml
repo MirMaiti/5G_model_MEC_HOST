@@ -1,0 +1,84 @@
+# SignBridge configuration.
+#
+# Every stage reads this one file: the collector, the trainer, the MEC server
+# and the capture host. An unknown key is an error rather than a silent no-op,
+# so a typo here surfaces immediately.
+
+# Which landmarks travel over the wire.
+#   hands       42 landmarks - two hands. The default.
+#   hands_pose  75 landmarks - adds body pose, for signs that depend on where
+#               the hands are relative to the body. Costs ~1.8x the bandwidth
+#               and needs the pose .task bundle on the host.
+layout: hands
+
+# Feature switches. Both are stored in the checkpoint, so changing one here
+# after training will be caught at load time rather than silently degrading
+# predictions.
+include_wrist_position: true   # keep where in frame the hand is
+include_interhand: true        # keep the vector between the two wrists
+
+capture:
+  camera_index: 0
+  width: 640
+  height: 480
+  target_fps: 30
+  hand_model_path: models/hand_landmarker.task
+  pose_model_path: models/pose_landmarker_lite.task
+  min_hand_detection_confidence: 0.5
+  min_hand_presence_confidence: 0.5
+  min_tracking_confidence: 0.5
+  mirror_preview: true
+
+data:
+  root: data
+  train_split: train
+  val_split: val
+  clip_frames: 45          # ~1.5 s at 30 fps
+  countdown_seconds: 2.0
+
+model:
+  architecture: gru        # mlp | gru | transformer
+  hidden_dim: 192
+  num_layers: 2
+  dropout: 0.3
+  window: 45               # frames per window; keep equal to clip_frames
+
+training:
+  epochs: 60
+  batch_size: 32
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  val_fraction: 0.2
+  patience: 15
+  seed: 1234
+  device: null             # null picks cuda, then mps, then cpu
+  checkpoint_dir: models
+  augment_noise: 0.01
+  augment_time_shift: 3
+
+server:
+  host: 0.0.0.0            # 127.0.0.1 to accept only local hosts
+  port: 9009
+  checkpoint: models/best.pt
+  device: null
+  window_size: 45          # rolling buffer depth
+  inference_interval: 5    # run the model every N frames
+  min_buffer: 20           # frames before the first prediction
+  vote_window: 5           # majority vote over recent predictions
+  min_confidence: 0.6      # below this, report silence rather than guess
+  max_connections: 8
+
+tts:
+  backend: auto            # auto | macos_say | pyttsx3 | null
+  voice: null
+  rate: null
+  repeat_cooldown: 2.5     # seconds before the same phrase repeats
+  stability_seconds: 0.4   # how long a label must hold before it is spoken
+
+host:
+  server_host: 127.0.0.1
+  server_port: 9009
+  connect_timeout: 5.0
+  show_preview: true
+  auto_reconnect: true
+  reconnect_delay: 2.0

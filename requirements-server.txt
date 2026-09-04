@@ -1,0 +1,3 @@
+# The MEC server. No camera stack: it never sees a pixel.
+-r requirements-core.txt
+torch>=2.0

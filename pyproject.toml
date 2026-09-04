@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "signbridge"
+version = "0.1.0"
+description = "Sign recognition over TCP: landmarks from the capture host, inference on a MEC server, speech back on the host."
+requires-python = ">=3.9"
+dependencies = ["numpy>=1.24", "PyYAML>=6.0"]
+
+[project.optional-dependencies]
+# Install only what the machine actually needs.
+server = ["torch>=2.0"]
+host = ["mediapipe>=0.10", "opencv-python>=4.8"]
+speech = ["pyttsx3>=2.90"]
+dev = ["pytest>=7.4"]
+
+[project.scripts]
+signbridge-serve = "signbridge.cli.serve:main"
+signbridge-host = "signbridge.cli.run_host:main"
+signbridge-collect = "signbridge.cli.collect:main"
+signbridge-train = "signbridge.cli.train:main"
+signbridge-fetch-models = "signbridge.cli.fetch_models:main"
+
+[tool.setuptools.packages.find]
+include = ["signbridge*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

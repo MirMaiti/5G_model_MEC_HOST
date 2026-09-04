@@ -1,0 +1,3 @@
+# Shared by both ends: the protocol, features and config.
+numpy>=1.24
+PyYAML>=6.0

@@ -1,0 +1,3 @@
+-r requirements-server.txt
+-r requirements-host.txt
+pytest>=7.4
