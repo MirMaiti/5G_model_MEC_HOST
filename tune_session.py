@@ -22,6 +22,16 @@ compared in one run):
 
     python tune_session.py --checkpoint models/best.pt --live-session sessions/
 
+If you know the order you intended to sign in when you recorded the take,
+pass it with --sequence and every combo is scored automatically instead of
+only being left for you to eyeball - each session then gets a ranked report:
+
+    python tune_session.py --checkpoint models/best.pt --live-session sessions/ \\
+        --sequence hello,no,yes,thankyou
+
+--checkpoint takes any checkpoint path, so this also doubles as a way to
+compare two trained models against the same recordings and sequence.
+
 Run this wherever the checkpoint and PyTorch live (the MEC/WSL), not the
 capture host.
 """
@@ -182,8 +192,42 @@ def summarize(events: Sequence[Dict[str, Any]]) -> str:
     return " -> ".join(parts)
 
 
+def observed_sequence(events: Sequence[Dict[str, Any]], gap_label: str) -> List[str]:
+    """The recognised real-sign labels in order, dropping silence and the gap/idle filler.
+
+    Consecutive events never repeat a label (each is a change), so this is
+    already the condensed sequence of distinct signs the combo reported.
+    """
+    return [e["label"] for e in events if e["label"] not in ("(silence)", gap_label)]
+
+
+def edit_distance(intended: Sequence[str], observed: Sequence[str]) -> int:
+    """Levenshtein distance between two label sequences (token-wise, not character-wise).
+
+    This is the standard way to score a recognised sequence against an
+    intended one when you know the order but not the timing - the same idea
+    speech recognition uses to compute word error rate. 0 means the combo
+    reported exactly the intended signs in the intended order; each insertion,
+    deletion or substitution needed to fix it up adds 1.
+    """
+    n, m = len(intended), len(observed)
+    previous = list(range(m + 1))
+    for i in range(1, n + 1):
+        current = [i] + [0] * m
+        for j in range(1, m + 1):
+            cost = 0 if intended[i - 1] == observed[j - 1] else 1
+            current[j] = min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + cost)
+        previous = current
+    return previous[m]
+
+
 def _replay_one_session(
-    predictor: TorchPredictor, session_path: Path, out_dir: Path, grid: Tuple[List[int], List[int], List[float]],
+    predictor: TorchPredictor,
+    session_path: Path,
+    out_dir: Path,
+    grid: Tuple[List[int], List[int], List[float]],
+    intended_sequence: Optional[List[str]],
+    gap_label: str,
 ) -> None:
     """Run every candidate combo against one recording, printing and saving each timeline."""
     with np.load(session_path) as data:
@@ -196,6 +240,7 @@ def _replay_one_session(
     session_out_dir = out_dir / session_path.stem
     session_out_dir.mkdir(parents=True, exist_ok=True)
     intervals, votes, confidences = grid
+    scored: List[Tuple[int, int, float, int, List[str]]] = []
 
     for interval in intervals:
         for vote_window in votes:
@@ -213,7 +258,39 @@ def _replay_one_session(
                     writer.writeheader()
                     writer.writerows(events)
 
-    print(f"Saved under {session_out_dir}/\n")
+                if intended_sequence is not None:
+                    observed = observed_sequence(events, gap_label)
+                    distance = edit_distance(intended_sequence, observed)
+                    scored.append((interval, vote_window, min_confidence, distance, observed))
+
+    if intended_sequence is not None:
+        scored.sort(key=lambda row: row[3])
+        print(f"--- Ranked against intended sequence: {' > '.join(intended_sequence)} ---")
+        print(f"{'interval':>8} {'vote':>5} {'min_conf':>9}  {'edit_dist':>9}  observed")
+        report_rows = []
+        for interval, vote_window, min_confidence, distance, observed in scored:
+            print(f"{interval:>8} {vote_window:>5} {min_confidence:>9.2f}  {distance:>9}  {' > '.join(observed)}")
+            report_rows.append(
+                {
+                    "interval": interval, "vote_window": vote_window, "min_confidence": min_confidence,
+                    "edit_distance": distance, "observed_sequence": " > ".join(observed),
+                }
+            )
+        report_path = session_out_dir / "report.csv"
+        with open(report_path, "w", newline="") as handle:
+            writer = csv.DictWriter(
+                handle, fieldnames=["interval", "vote_window", "min_confidence", "edit_distance", "observed_sequence"]
+            )
+            writer.writeheader()
+            writer.writerows(report_rows)
+        best = scored[0]
+        print(
+            f"\nBest for {session_path.stem}: inference_interval={best[0]}, vote_window={best[1]}, "
+            f"min_confidence={best[2]} (edit distance {best[3]})"
+        )
+        print(f"Full ranking saved to {report_path}\n")
+    else:
+        print(f"Saved under {session_out_dir}/\n")
 
 
 def run_live_session(predictor: TorchPredictor, args: argparse.Namespace, grid: Tuple[List[int], List[int], List[float]]) -> int:
@@ -227,13 +304,22 @@ def run_live_session(predictor: TorchPredictor, args: argparse.Namespace, grid: 
     else:
         session_paths = [target]
 
+    intended_sequence: Optional[List[str]] = None
+    if args.sequence:
+        intended_sequence = [label.strip() for label in args.sequence.split(",") if label.strip()]
+        known = set(predictor.labels)
+        unknown = [label for label in intended_sequence if label not in known]
+        if unknown:
+            print(f"warning: --sequence has labels the model doesn't know: {unknown}", file=sys.stderr)
+
     out_dir = Path(args.out_dir)
     for session_path in session_paths:
-        _replay_one_session(predictor, session_path, out_dir, grid)
+        _replay_one_session(predictor, session_path, out_dir, grid, intended_sequence, args.gap_label)
 
     if len(session_paths) > 1:
         print(f"Compared {len(session_paths)} sessions - each has its own subfolder under {out_dir}/.")
-    print("Compare the printed lines against what you actually signed, or open the CSVs for detail.")
+    if intended_sequence is None:
+        print("Compare the printed lines against what you actually signed, or open the CSVs for detail.")
     return 0
 
 
@@ -248,6 +334,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         "instead of scoring against data/train clips.",
     )
     parser.add_argument("--out-dir", default="tuning_results", help="Where --live-session timelines are saved")
+    parser.add_argument(
+        "--sequence", default=None,
+        help="Comma-separated labels in the order you intended to sign them during --live-session "
+        "recordings, e.g. hello,no,yes,thankyou. When given, every combo is scored by edit "
+        "distance against this instead of only being left for you to eyeball.",
+    )
     parser.add_argument("--gap-label", default="idle", help="Label used as the transition/idle filler (default: idle)")
     parser.add_argument("--segments-per-label", type=int, default=4, help="Real-sign clips per label in the stream")
     parser.add_argument("--intervals", default="3,5,8", help="Comma-separated inference_interval candidates")
