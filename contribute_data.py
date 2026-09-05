@@ -70,6 +70,46 @@ def assemble(hand_result) -> tuple[np.ndarray, np.ndarray]:
     return landmarks, mask
 
 
+_INVALID_LABEL_CHARS = set('<>:"/\\|?*')
+_RESERVED_WINDOWS_NAMES = {
+    "con", "prn", "aux", "nul",
+    *(f"com{i}" for i in range(1, 10)),
+    *(f"lpt{i}" for i in range(1, 10)),
+}
+
+
+def normalize_label(raw: str) -> str:
+    """Make a label safe to use as a directory/file name on every OS.
+
+    Different contributors on different platforms recording the same sign
+    with different casing or stray characters is how a merged dataset ends
+    up with duplicate classes (silent) or unrecoverable git checkout errors
+    on a case-insensitive filesystem like Windows' (loud) - so labels are
+    forced to a single canonical form before anything is written to disk.
+
+    Raises:
+        SystemExit: If the label contains a path separator or a character
+            that is invalid in a Windows filename, or is empty after
+            normalizing - re-recording with a different label is the only
+            fix, so this fails fast rather than writing something that would
+            corrupt someone else's merge later.
+    """
+    label = raw.strip().lower()
+    if not label:
+        raise SystemExit("--label cannot be empty (after trimming whitespace).")
+    if any(char in _INVALID_LABEL_CHARS for char in label):
+        raise SystemExit(
+            f"--label {raw!r} contains a character that is invalid in a Windows "
+            f"filename ({''.join(sorted(_INVALID_LABEL_CHARS))}). Pick a plain "
+            "word, e.g. 'thank_you' instead of 'thank/you'."
+        )
+    if label in _RESERVED_WINDOWS_NAMES:
+        raise SystemExit(f"--label {raw!r} is a reserved Windows device name. Pick a different label.")
+    if label != raw:
+        print(f"Note: using label '{label}' (normalized from '{raw}') so it matches across contributors.")
+    return label
+
+
 def write_clip(destination: Path, label: str, landmarks: List[np.ndarray], masks: List[np.ndarray]) -> Path:
     """Write one recorded clip as a ``.npz``, matching the main project's schema."""
     destination.mkdir(parents=True, exist_ok=True)
@@ -104,6 +144,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"Missing dependency: {exc}\nInstall with: pip install mediapipe opencv-python numpy", file=sys.stderr)
         return 1
 
+    args.label = normalize_label(args.label)
     model_path = ensure_model(Path(args.model))
     destination = Path(args.out) / args.label
 
