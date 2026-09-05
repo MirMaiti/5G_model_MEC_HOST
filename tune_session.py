@@ -22,9 +22,10 @@ capture host.
 from __future__ import annotations
 
 import argparse
+import csv
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -136,10 +137,88 @@ def evaluate(
     }
 
 
+def replay_and_log(
+    predictor: TorchPredictor, features: np.ndarray, timestamps: np.ndarray, config: SessionConfig,
+) -> List[Dict[str, Any]]:
+    """Replay a real recording through one config, logging every label change.
+
+    There is no ground truth for a live take, so unlike :func:`evaluate` this
+    does not score anything - it just returns the timeline for you to judge
+    against what you remember actually signing.
+    """
+    session = InferenceSession(predictor, config)
+    events: List[Dict[str, Any]] = []
+    for i in range(features.shape[0]):
+        reply = session.add_features(features[i])
+        if reply is not None and reply["changed"]:
+            events.append(
+                {
+                    "frame": i,
+                    "seconds": round(float(timestamps[i]), 2),
+                    "label": reply["label"] or "(silence)",
+                    "raw_label": reply["raw_label"] or "(silence)",
+                    "confidence": reply["confidence"],
+                }
+            )
+    return events
+
+
+def summarize(events: Sequence[Dict[str, Any]]) -> str:
+    """One line, label(duration) -> label(duration) -> ..., for quick eyeballing."""
+    if not events:
+        return "(no changes reported)"
+    parts = []
+    for i, event in enumerate(events):
+        end = events[i + 1]["seconds"] if i + 1 < len(events) else None
+        duration = f"{end - event['seconds']:.1f}s" if end is not None else "..."
+        parts.append(f"{event['label']}({duration})")
+    return " -> ".join(parts)
+
+
+def run_live_session(predictor: TorchPredictor, args: argparse.Namespace, grid: Tuple[List[int], List[int], List[float]]) -> int:
+    """Replay a recorded live take through every candidate combo and save each timeline."""
+    with np.load(args.live_session) as data:
+        landmarks, mask = data["landmarks"], data["mask"]
+        timestamps = data["timestamps"] if "timestamps" in data else np.arange(landmarks.shape[0]) / 30.0
+
+    features = predictor.extractor.transform_sequence(landmarks, mask)
+    print(f"Live session: {features.shape[0]} frames, {timestamps[-1]:.1f}s\n")
+
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    intervals, votes, confidences = grid
+
+    for interval in intervals:
+        for vote_window in votes:
+            for min_confidence in confidences:
+                config = SessionConfig(
+                    inference_interval=interval, vote_window=vote_window, min_confidence=min_confidence,
+                )
+                events = replay_and_log(predictor, features, timestamps, config)
+                name = f"interval{interval}_vote{vote_window}_conf{min_confidence}"
+                print(f"[{name}]\n  {summarize(events)}\n")
+
+                csv_path = out_dir / f"{name}.csv"
+                with open(csv_path, "w", newline="") as handle:
+                    writer = csv.DictWriter(handle, fieldnames=["frame", "seconds", "label", "raw_label", "confidence"])
+                    writer.writeheader()
+                    writer.writerows(events)
+
+    print(f"Per-combo timelines saved under {out_dir}/ - compare the lines above against what")
+    print("you actually signed, or open the CSVs for frame-by-frame detail.")
+    return 0
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--checkpoint", default="models/best.pt")
     parser.add_argument("--data", default="data/train")
+    parser.add_argument(
+        "--live-session", default=None,
+        help="Path to a recording from record_session.py. If given, replays it through every "
+        "combo and saves each timeline for you to judge instead of scoring against data/train clips.",
+    )
+    parser.add_argument("--out-dir", default="tuning_results", help="Where --live-session timelines are saved")
     parser.add_argument("--gap-label", default="idle", help="Label used as the transition/idle filler (default: idle)")
     parser.add_argument("--segments-per-label", type=int, default=4, help="Real-sign clips per label in the stream")
     parser.add_argument("--intervals", default="3,5,8", help="Comma-separated inference_interval candidates")
@@ -154,6 +233,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     confidences = [float(x) for x in args.confidences.split(",")]
 
     predictor = TorchPredictor(args.checkpoint, device=args.device)
+
+    if args.live_session:
+        return run_live_session(predictor, args, (intervals, votes, confidences))
+
     real_labels = [label for label in predictor.labels if label != args.gap_label]
 
     try:
