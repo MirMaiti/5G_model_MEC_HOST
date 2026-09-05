@@ -110,10 +110,15 @@ class FeatureExtractor:
             "dim": self.dim,
         }
 
+    @property
+    def _hand_block_width(self) -> int:
+        """Length of one hand's block, so its position in the vector is known without recomputing it."""
+        return HAND_BLOCK_DIM if self.config.include_wrist_position else HAND_BLOCK_DIM - 2
+
     def _hand_block(self, coords: np.ndarray, mask: np.ndarray) -> np.ndarray:
         """Normalise one hand to a wrist-centred, scale-free block."""
         present = float(mask.mean()) >= _PRESENCE_THRESHOLD
-        width = HAND_BLOCK_DIM if self.config.include_wrist_position else HAND_BLOCK_DIM - 2
+        width = self._hand_block_width
         block = np.zeros(width, dtype=np.float32)
         if not present:
             return block
@@ -154,6 +159,19 @@ class FeatureExtractor:
         block[0] = 1.0
         block[1:] = ((coords - centre) / scale).reshape(-1)
         return block
+
+    def hands_present(self, features: np.ndarray) -> bool:
+        """Whether either hand's presence flag is set in one feature vector.
+
+        Index 0 of each hand block is 1.0 when that hand was detected in the
+        source frame and 0.0 - with the rest of the block zeroed - when it was
+        not (see :meth:`_hand_block`). Reading it back here means a caller can
+        ask "was any hand actually visible?" without knowing the block layout,
+        which is what lets "no hand at all" be handled as a certainty rather
+        than something the model has to learn to recognise.
+        """
+        width = self._hand_block_width
+        return bool(features[0] > 0.0 or features[width] > 0.0)
 
     def transform_frame(self, landmarks: np.ndarray, mask: np.ndarray) -> np.ndarray:
         """Build the feature vector for one frame.

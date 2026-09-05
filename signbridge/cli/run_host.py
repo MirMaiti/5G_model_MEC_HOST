@@ -138,15 +138,19 @@ def main(argv: Optional[List[str]] = None) -> int:
         """Print each change, and speak it when the model is trained."""
         nonlocal last_label
         label = result.get("label", "")
+        # "idle" is worth showing on screen - it's confirmation the model
+        # correctly recognised a non-sign - but saying it out loud every time
+        # the signer's hands are simply at rest would be worse than silence.
+        speakable = "" if label == "idle" else label
         if result.get("changed") and label:
-            spoken = speaker.offer(label) if speaker is not None else False
+            spoken = speaker.offer(speakable) if speaker is not None else False
             marker = "spoken" if spoken else ("untrained" if result.get("untrained") else "")
             print(
                 f"  {label:<16} {result.get('confidence', 0):5.1%}  "
                 f"{result.get('inference_ms', 0):5.1f} ms  {marker}"
             )
         elif speaker is not None:
-            speaker.offer(label)
+            speaker.offer(speakable)
         last_label = label
 
     def on_frame(frame: Any, stats: SessionStats) -> bool:

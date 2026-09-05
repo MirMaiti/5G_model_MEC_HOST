@@ -63,6 +63,10 @@ class InferenceSession:
         self._votes: Deque[str] = collections.deque(maxlen=max(1, self.config.vote_window))
         self.frames_seen = 0
         self.current_label = SILENCE
+        #: Consecutive frames added with no hand detected at all. Used to skip
+        #: the model - rather than trust it to learn the pattern - when the
+        #: buffer holds nothing but empty frames.
+        self._frames_without_hands = 0
 
     @property
     def extractor(self) -> FeatureExtractor:
@@ -80,6 +84,7 @@ class InferenceSession:
         self._votes.clear()
         self.frames_seen = 0
         self.current_label = SILENCE
+        self._frames_without_hands = 0
 
     def add_landmarks(self, landmarks: np.ndarray, mask: np.ndarray) -> Optional[Dict[str, Any]]:
         """Add one frame of raw landmarks and predict when one is due.
@@ -100,8 +105,12 @@ class InferenceSession:
         Returns:
             A response dict on inference frames, otherwise ``None``.
         """
-        self._buffer.append(np.asarray(features, dtype=np.float32))
+        features = np.asarray(features, dtype=np.float32)
+        self._buffer.append(features)
         self.frames_seen += 1
+        self._frames_without_hands = (
+            0 if self.extractor.hands_present(features) else self._frames_without_hands + 1
+        )
 
         if len(self._buffer) < self.config.min_buffer:
             return None
@@ -109,13 +118,22 @@ class InferenceSession:
             return None
 
         started = time.perf_counter()
-        # The buffer is shorter than the training window until it fills; resample
-        # so a half-full buffer still looks like a whole clip to the model.
-        window = resample_sequence(np.stack(self._buffer), self.predictor.window)
-        prediction = self.predictor.predict(window)
+        # Nothing currently buffered had a hand in it at all - this is certain,
+        # not a judgement call, so it is handled as a rule instead of asking a
+        # model trained on a finite number of clips to recognise an all-zero
+        # input. Also skips a wasted forward pass.
+        no_hands = self._frames_without_hands >= len(self._buffer)
+        if no_hands:
+            raw_label, confidence, top = SILENCE, 0.0, {}
+        else:
+            # The buffer is shorter than the training window until it fills;
+            # resample so a half-full buffer still looks like a whole clip.
+            window = resample_sequence(np.stack(self._buffer), self.predictor.window)
+            prediction = self.predictor.predict(window)
+            raw_label, confidence, top = prediction.label, prediction.confidence, prediction.top
         elapsed_ms = (time.perf_counter() - started) * 1000.0
 
-        candidate = prediction.label if prediction.confidence >= self.config.min_confidence else SILENCE
+        candidate = raw_label if (not no_hands and confidence >= self.config.min_confidence) else SILENCE
         self._votes.append(candidate)
         stable = collections.Counter(self._votes).most_common(1)[0][0]
 
@@ -124,9 +142,9 @@ class InferenceSession:
 
         return {
             "label": stable,
-            "raw_label": prediction.label,
-            "confidence": round(float(prediction.confidence), 4),
-            "top": {k: round(float(v), 4) for k, v in prediction.top.items()},
+            "raw_label": raw_label,
+            "confidence": round(float(confidence), 4),
+            "top": {k: round(float(v), 4) for k, v in top.items()},
             "changed": changed,
             "buffered": len(self._buffer),
             "frames_seen": self.frames_seen,

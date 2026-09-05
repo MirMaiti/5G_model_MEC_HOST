@@ -147,3 +147,34 @@ def test_untrained_flag_propagates_to_the_reply(extractor, rng):
         SessionConfig(min_buffer=5, inference_interval=5, min_confidence=0.0),
     )
     assert feed(session, rng, 10)[0]["untrained"] is True
+
+
+def test_no_hands_reports_silence_without_calling_the_model(extractor, rng):
+    """An empty buffer is a certainty, not a guess: the model is never asked."""
+    predictor = ScriptedPredictor(extractor, ["a", "b"], [("a", 0.95)] * 10)
+    session = InferenceSession(
+        predictor,
+        SessionConfig(min_buffer=5, inference_interval=5, vote_window=1, min_confidence=0.0),
+    )
+    for _ in range(20):
+        landmarks, mask = make_frame(rng, hands=0)
+        reply = session.add_landmarks(landmarks, mask)
+        if reply is not None:
+            assert reply["label"] == ""
+            assert reply["raw_label"] == ""
+    assert predictor.calls == 0
+
+
+def test_hands_reappearing_lets_the_model_run_again(extractor, rng):
+    """Once a hand is visible in the buffer, real inference resumes."""
+    predictor = ScriptedPredictor(extractor, ["a", "b"], [("a", 0.95)] * 10)
+    session = InferenceSession(
+        predictor,
+        SessionConfig(min_buffer=5, inference_interval=5, vote_window=1, min_confidence=0.5),
+    )
+    for _ in range(10):
+        landmarks, mask = make_frame(rng, hands=0)
+        session.add_landmarks(landmarks, mask)
+    replies = feed(session, rng, 10)  # hands=2 by default
+    assert replies and replies[-1]["label"] == "a"
+    assert predictor.calls > 0
