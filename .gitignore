@@ -11,5 +11,5 @@ models/*.task
 .DS_Store
 
 # Ad-hoc tuning recordings and their sweep output, not curated training data.
-sessions/
-tuning_results/
+# sessions/
+# tuning_results/
