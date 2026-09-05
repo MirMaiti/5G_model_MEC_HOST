@@ -15,6 +15,13 @@ Usage:
 
     python tune_session.py --checkpoint models/best.pt --data data/train
 
+Or, to judge combos yourself against a real recording from record_session.py
+instead of scoring against data/train clips - pass either one file or a
+whole folder of them (e.g. sessions/, so every take you've recorded gets
+compared in one run):
+
+    python tune_session.py --checkpoint models/best.pt --live-session sessions/
+
 Run this wherever the checkpoint and PyTorch live (the MEC/WSL), not the
 capture host.
 """
@@ -175,17 +182,19 @@ def summarize(events: Sequence[Dict[str, Any]]) -> str:
     return " -> ".join(parts)
 
 
-def run_live_session(predictor: TorchPredictor, args: argparse.Namespace, grid: Tuple[List[int], List[int], List[float]]) -> int:
-    """Replay a recorded live take through every candidate combo and save each timeline."""
-    with np.load(args.live_session) as data:
+def _replay_one_session(
+    predictor: TorchPredictor, session_path: Path, out_dir: Path, grid: Tuple[List[int], List[int], List[float]],
+) -> None:
+    """Run every candidate combo against one recording, printing and saving each timeline."""
+    with np.load(session_path) as data:
         landmarks, mask = data["landmarks"], data["mask"]
         timestamps = data["timestamps"] if "timestamps" in data else np.arange(landmarks.shape[0]) / 30.0
 
     features = predictor.extractor.transform_sequence(landmarks, mask)
-    print(f"Live session: {features.shape[0]} frames, {timestamps[-1]:.1f}s\n")
+    print(f"=== {session_path.name}: {features.shape[0]} frames, {timestamps[-1]:.1f}s ===\n")
 
-    out_dir = Path(args.out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    session_out_dir = out_dir / session_path.stem
+    session_out_dir.mkdir(parents=True, exist_ok=True)
     intervals, votes, confidences = grid
 
     for interval in intervals:
@@ -198,14 +207,33 @@ def run_live_session(predictor: TorchPredictor, args: argparse.Namespace, grid: 
                 name = f"interval{interval}_vote{vote_window}_conf{min_confidence}"
                 print(f"[{name}]\n  {summarize(events)}\n")
 
-                csv_path = out_dir / f"{name}.csv"
+                csv_path = session_out_dir / f"{name}.csv"
                 with open(csv_path, "w", newline="") as handle:
                     writer = csv.DictWriter(handle, fieldnames=["frame", "seconds", "label", "raw_label", "confidence"])
                     writer.writeheader()
                     writer.writerows(events)
 
-    print(f"Per-combo timelines saved under {out_dir}/ - compare the lines above against what")
-    print("you actually signed, or open the CSVs for frame-by-frame detail.")
+    print(f"Saved under {session_out_dir}/\n")
+
+
+def run_live_session(predictor: TorchPredictor, args: argparse.Namespace, grid: Tuple[List[int], List[int], List[float]]) -> int:
+    """Replay one recording, or every recording in a folder (e.g. sessions/), through every combo."""
+    target = Path(args.live_session)
+    if target.is_dir():
+        session_paths = sorted(target.glob("*.npz"))
+        if not session_paths:
+            print(f"No .npz recordings found under {target}/", file=sys.stderr)
+            return 1
+    else:
+        session_paths = [target]
+
+    out_dir = Path(args.out_dir)
+    for session_path in session_paths:
+        _replay_one_session(predictor, session_path, out_dir, grid)
+
+    if len(session_paths) > 1:
+        print(f"Compared {len(session_paths)} sessions - each has its own subfolder under {out_dir}/.")
+    print("Compare the printed lines against what you actually signed, or open the CSVs for detail.")
     return 0
 
 
@@ -215,8 +243,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--data", default="data/train")
     parser.add_argument(
         "--live-session", default=None,
-        help="Path to a recording from record_session.py. If given, replays it through every "
-        "combo and saves each timeline for you to judge instead of scoring against data/train clips.",
+        help="A recording from record_session.py, or a folder of them (e.g. sessions/). If "
+        "given, replays each through every combo and saves its timeline for you to judge, "
+        "instead of scoring against data/train clips.",
     )
     parser.add_argument("--out-dir", default="tuning_results", help="Where --live-session timelines are saved")
     parser.add_argument("--gap-label", default="idle", help="Label used as the transition/idle filler (default: idle)")

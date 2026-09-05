@@ -8,11 +8,14 @@ judge the results yourself.
 
 Usage:
 
-    python record_session.py --out session.npz
+    python record_session.py
 
-Sign naturally for however long you like - a few real signs, pause, drift
-into another, repeat. Press 'q' (or Ctrl+C) to stop and save. Only landmark
-coordinates and per-frame timestamps are written - no video.
+Each run is saved as its own timestamped file under sessions/, so recording
+several takes never overwrites an earlier one - pass --out to name it
+yourself instead. Sign naturally for however long you like - a few real
+signs, pause, drift into another, repeat. Press 'q' (or Ctrl+C) to stop and
+save. Only landmark coordinates and per-frame timestamps are written - no
+video.
 
 Needs: pip install mediapipe opencv-python numpy
 """
@@ -22,6 +25,7 @@ from __future__ import annotations
 import argparse
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
@@ -29,10 +33,21 @@ import numpy as np
 
 from contribute_data import NUM_HAND_LANDMARKS, assemble, ensure_model
 
+SESSIONS_DIR = "sessions"
+
+
+def default_output_path() -> Path:
+    """A timestamped path under sessions/, so takes accumulate instead of overwriting."""
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return Path(SESSIONS_DIR) / f"session_{stamp}.npz"
+
 
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--out", default="session_recording.npz", help="Output file (default: session_recording.npz)")
+    parser.add_argument(
+        "--out", default=None,
+        help=f"Output file (default: {SESSIONS_DIR}/session_<timestamp>.npz)",
+    )
     parser.add_argument("--model", default="models/hand_landmarker.task", help="Path to the model bundle")
     parser.add_argument("--camera", type=int, default=0, help="Camera index")
     parser.add_argument("--no-preview", action="store_true", help="Record without a preview window")
@@ -111,7 +126,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("No frames recorded.", file=sys.stderr)
         return 1
 
-    out_path = Path(args.out)
+    out_path = Path(args.out) if args.out else default_output_path()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(
         out_path,
         landmarks=np.stack(landmarks_log).astype(np.float32),
@@ -121,7 +137,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     print(f"\nSaved {len(landmarks_log)} frames ({timestamps_log[-1]:.1f}s) to {out_path}")
     print("Copy this file to wherever the trained model/tune_session.py runs, then:")
-    print(f"    python tune_session.py --checkpoint models/best.pt --live-session {out_path.name}")
+    print(f"    python tune_session.py --checkpoint models/best.pt --live-session {out_path.as_posix()}")
     return 0
 
 
