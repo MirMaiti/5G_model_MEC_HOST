@@ -51,6 +51,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--model", default="models/hand_landmarker.task", help="Path to the model bundle")
     parser.add_argument("--camera", type=int, default=0, help="Camera index")
     parser.add_argument("--no-preview", action="store_true", help="Record without a preview window")
+    parser.add_argument(
+        "--sequence", default=None,
+        help="Comma-separated labels in the order you intend to sign them, e.g. hello,no,yes,thankyou. "
+        "Saved into the recording itself, so tune_session.py --live-session scores this take against "
+        "its own plan automatically - each recording can have a different one.",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -76,6 +82,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     show_preview = not args.no_preview
+    if args.sequence:
+        print(f"Planned sequence: {args.sequence.replace(',', ' -> ')}")
     print("Recording. Sign naturally - real signs, pauses, transitions between them.")
     print("Press 'q' in the preview window (or Ctrl+C here) to stop and save.\n")
 
@@ -128,12 +136,19 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     out_path = Path(args.out) if args.out else default_output_path()
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(
-        out_path,
+    save_kwargs = dict(
         landmarks=np.stack(landmarks_log).astype(np.float32),
         mask=np.stack(masks_log).astype(np.float32),
         timestamps=np.array(timestamps_log, dtype=np.float64),
         layout=np.array("hands"),
+    )
+    if args.sequence:
+        # Stored as the raw comma-separated string; tune_session.py splits it
+        # the same way it splits its own --sequence CLI argument.
+        save_kwargs["sequence"] = np.array(args.sequence)
+    np.savez_compressed(
+        out_path,
+        **save_kwargs,
     )
     print(f"\nSaved {len(landmarks_log)} frames ({timestamps_log[-1]:.1f}s) to {out_path}")
     print("Copy this file to wherever the trained model/tune_session.py runs, then:")

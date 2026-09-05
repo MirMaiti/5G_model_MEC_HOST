@@ -22,15 +22,22 @@ compared in one run):
 
     python tune_session.py --checkpoint models/best.pt --live-session sessions/
 
-If you know the order you intended to sign in when you recorded the take,
-pass it with --sequence and every combo is scored automatically instead of
-only being left for you to eyeball - each session then gets a ranked report:
+If you know the order you intended to sign in, each combo can be scored
+automatically instead of only being left for you to eyeball. The intended
+way: tell record_session.py the plan up front, so it's saved into the
+recording itself -
+
+    python record_session.py --sequence hello,no,yes,thankyou
+
+- which means different sessions in the same sweep can each carry their own
+different plan, read back automatically. --sequence here is only a fallback
+for recordings that don't have one embedded (e.g. older takes):
 
     python tune_session.py --checkpoint models/best.pt --live-session sessions/ \\
         --sequence hello,no,yes,thankyou
 
 --checkpoint takes any checkpoint path, so this also doubles as a way to
-compare two trained models against the same recordings and sequence.
+compare two trained models against the same recordings and sequences.
 
 Run this wherever the checkpoint and PyTorch live (the MEC/WSL), not the
 capture host.
@@ -226,16 +233,37 @@ def _replay_one_session(
     session_path: Path,
     out_dir: Path,
     grid: Tuple[List[int], List[int], List[float]],
-    intended_sequence: Optional[List[str]],
+    fallback_sequence: Optional[List[str]],
     gap_label: str,
 ) -> None:
-    """Run every candidate combo against one recording, printing and saving each timeline."""
+    """Run every candidate combo against one recording, printing and saving each timeline.
+
+    A recording made with ``record_session.py --sequence ...`` carries its own
+    intended sequence, so each session can be scored against its own plan
+    even when several sessions (with different plans) are swept in one run.
+    ``fallback_sequence`` (from this script's own ``--sequence``) is used
+    only for recordings that don't have one embedded.
+    """
     with np.load(session_path) as data:
         landmarks, mask = data["landmarks"], data["mask"]
         timestamps = data["timestamps"] if "timestamps" in data else np.arange(landmarks.shape[0]) / 30.0
+        embedded = str(data["sequence"].item()) if "sequence" in data else None
+
+    if embedded:
+        intended_sequence: Optional[List[str]] = [label.strip() for label in embedded.split(",") if label.strip()]
+        sequence_source = "embedded in this recording"
+    elif fallback_sequence is not None:
+        intended_sequence = fallback_sequence
+        sequence_source = "--sequence default"
+    else:
+        intended_sequence = None
+        sequence_source = None
 
     features = predictor.extractor.transform_sequence(landmarks, mask)
-    print(f"=== {session_path.name}: {features.shape[0]} frames, {timestamps[-1]:.1f}s ===\n")
+    print(f"=== {session_path.name}: {features.shape[0]} frames, {timestamps[-1]:.1f}s ===")
+    if sequence_source:
+        print(f"    sequence ({sequence_source}): {' > '.join(intended_sequence)}")
+    print()
 
     session_out_dir = out_dir / session_path.stem
     session_out_dir.mkdir(parents=True, exist_ok=True)
@@ -304,22 +332,23 @@ def run_live_session(predictor: TorchPredictor, args: argparse.Namespace, grid: 
     else:
         session_paths = [target]
 
-    intended_sequence: Optional[List[str]] = None
+    # Used only for recordings with no --sequence of their own embedded at
+    # record time - each session's own plan (if it has one) always wins.
+    fallback_sequence: Optional[List[str]] = None
     if args.sequence:
-        intended_sequence = [label.strip() for label in args.sequence.split(",") if label.strip()]
+        fallback_sequence = [label.strip() for label in args.sequence.split(",") if label.strip()]
         known = set(predictor.labels)
-        unknown = [label for label in intended_sequence if label not in known]
+        unknown = [label for label in fallback_sequence if label not in known]
         if unknown:
             print(f"warning: --sequence has labels the model doesn't know: {unknown}", file=sys.stderr)
 
     out_dir = Path(args.out_dir)
     for session_path in session_paths:
-        _replay_one_session(predictor, session_path, out_dir, grid, intended_sequence, args.gap_label)
+        _replay_one_session(predictor, session_path, out_dir, grid, fallback_sequence, args.gap_label)
 
     if len(session_paths) > 1:
         print(f"Compared {len(session_paths)} sessions - each has its own subfolder under {out_dir}/.")
-    if intended_sequence is None:
-        print("Compare the printed lines against what you actually signed, or open the CSVs for detail.")
+    print("A session with no sequence, embedded or via --sequence, is left for you to eyeball; open its CSVs for detail.")
     return 0
 
 
@@ -336,9 +365,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--out-dir", default="tuning_results", help="Where --live-session timelines are saved")
     parser.add_argument(
         "--sequence", default=None,
-        help="Comma-separated labels in the order you intended to sign them during --live-session "
-        "recordings, e.g. hello,no,yes,thankyou. When given, every combo is scored by edit "
-        "distance against this instead of only being left for you to eyeball.",
+        help="Fallback intended sequence (comma-separated labels, e.g. hello,no,yes,thankyou) "
+        "for --live-session recordings that don't have one embedded via record_session.py "
+        "--sequence. A recording's own embedded sequence always takes priority over this.",
     )
     parser.add_argument("--gap-label", default="idle", help="Label used as the transition/idle filler (default: idle)")
     parser.add_argument("--segments-per-label", type=int, default=4, help="Real-sign clips per label in the stream")
