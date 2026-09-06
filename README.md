@@ -135,18 +135,43 @@ For a separate validation set instead of an automatic split, record into
 
 **Recruiting other people to record clips?** They don't need this whole repo,
 a venv, or `signbridge` installed — send them
-[`contribute_data.py`](contribute_data.py) on its own:
+[`contribute_data.py`](contribute_data.py) on its own. It writes `.npz`
+clips in the exact same format as `signbridge.cli.collect`, so their output
+folder merges straight into this project's `data/train/` with nothing to
+convert.
 
-```bash
-pip install mediapipe opencv-python numpy
-python contribute_data.py --label hello --samples 30
-```
+What to tell a contributor:
 
-It writes `.npz` clips in the exact same format as `signbridge.cli.collect`
-(it auto-downloads the hand-landmarker model on first run), so the resulting
-`data/train/<label>/` folder can be zipped up and dropped straight into this
-project's `data/train/`, or pushed directly if they have write access to a
-fork. Appends to a label that already exists rather than replacing it.
+1. **Get the one file** — no clone needed:
+   ```bash
+   curl -O https://raw.githubusercontent.com/MirMaiti/5G_model_MEC_HOST/main/contribute_data.py
+   ```
+2. **Install the three dependencies:**
+   ```bash
+   pip install mediapipe opencv-python numpy
+   ```
+3. **Record the sign you tell them to** — labels must match yours exactly
+   (lowercase, no spaces or slashes; the script normalizes and rejects
+   anything unsafe):
+   ```bash
+   python contribute_data.py --label hello --samples 30
+   ```
+   First run auto-downloads the hand-landmarker model into `models/` next to
+   the script. `SPACE` starts each clip (short countdown, then ~1.5s
+   recording), `q` quits early. It prints
+   `[12/30] hello-....npz (44/45 frames with hands)` per clip — tell them to
+   keep both hands in frame; low counts get auto-discarded. Running the same
+   command again **adds** clips, it never overwrites, so they can top up
+   later.
+4. **Vary how they record** — same advice as recording it yourself: distance,
+   angle, lighting, a few separate sessions rather than 30 in one sitting.
+5. **Send the folder back.** Their clips land in `data/train/<label>/` next
+   to the script — zip that (or the whole `data/train/` for multiple labels)
+   and send it over. No video is ever written, only coordinates.
+
+On your end: unzip their folder into your own `data/train/<label>/`.
+Filenames won't clash (each gets a random 12-hex-character UUID), so folders
+from different contributors merge with nothing to rename.
 
 ---
 
