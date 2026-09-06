@@ -133,6 +133,21 @@ What actually makes the model work:
 For a separate validation set instead of an automatic split, record into
 `--split val`.
 
+**Recruiting other people to record clips?** They don't need this whole repo,
+a venv, or `signbridge` installed — send them
+[`contribute_data.py`](contribute_data.py) on its own:
+
+```bash
+pip install mediapipe opencv-python numpy
+python contribute_data.py --label hello --samples 30
+```
+
+It writes `.npz` clips in the exact same format as `signbridge.cli.collect`
+(it auto-downloads the hand-landmarker model on first run), so the resulting
+`data/train/<label>/` folder can be zipped up and dropped straight into this
+project's `data/train/`, or pushed directly if they have write access to a
+fork. Appends to a label that already exists rather than replacing it.
+
 ---
 
 ## 4. Train
