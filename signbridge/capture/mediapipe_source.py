@@ -109,10 +109,17 @@ class MediaPipeSource(LandmarkSource):
         capture.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
         self._capture = capture
 
+        # Force CPU: the default delegate selection tries GPU on some
+        # machines (notably some Macs) where MediaPipe's GPU service isn't
+        # reliably available from a plain Python venv, crashing with "Check
+        # failed: service Service is unavailable" instead of falling back -
+        # CPU is fast enough for landmarks anyway.
         detection, presence, tracking = self._hand_options
         self._hands = vision.HandLandmarker.create_from_options(
             vision.HandLandmarkerOptions(
-                base_options=BaseOptions(model_asset_path=str(self._hand_model_path)),
+                base_options=BaseOptions(
+                    model_asset_path=str(self._hand_model_path), delegate=BaseOptions.Delegate.CPU
+                ),
                 running_mode=vision.RunningMode.VIDEO,
                 num_hands=2,
                 min_hand_detection_confidence=detection,
@@ -123,7 +130,9 @@ class MediaPipeSource(LandmarkSource):
         if self._pose_model_path is not None:
             self._pose = vision.PoseLandmarker.create_from_options(
                 vision.PoseLandmarkerOptions(
-                    base_options=BaseOptions(model_asset_path=str(self._pose_model_path)),
+                    base_options=BaseOptions(
+                        model_asset_path=str(self._pose_model_path), delegate=BaseOptions.Delegate.CPU
+                    ),
                     running_mode=vision.RunningMode.VIDEO,
                     num_poses=1,
                 )

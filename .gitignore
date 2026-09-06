@@ -2,10 +2,5 @@
 __pycache__/
 *.py[cod]
 
-# Trained weights: yours, and too big for git.
-models/*.pt
-models/*.task
-!models/.gitkeep
-
 .pytest_cache/
 .DS_Store

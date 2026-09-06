@@ -155,7 +155,12 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     landmarker = vision.HandLandmarker.create_from_options(
         vision.HandLandmarkerOptions(
-            base_options=BaseOptions(model_asset_path=str(model_path)),
+            # Force CPU: the default delegate selection tries GPU on some
+            # machines (notably some Macs) where MediaPipe's GPU service
+            # isn't reliably available from a plain Python venv, crashing
+            # with "Check failed: service Service is unavailable" rather
+            # than falling back - CPU is fast enough for landmarks anyway.
+            base_options=BaseOptions(model_asset_path=str(model_path), delegate=BaseOptions.Delegate.CPU),
             running_mode=vision.RunningMode.VIDEO,
             num_hands=2,
         )
