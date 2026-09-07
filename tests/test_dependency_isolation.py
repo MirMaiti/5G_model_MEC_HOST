@@ -36,6 +36,11 @@ def test_server_does_not_import_a_camera_stack():
     assert _modules_loaded_by("signbridge.cli.serve", ("mediapipe", "cv2")) == set()
 
 
+def test_ws_bridge_does_not_import_a_camera_stack():
+    """The browser does its own landmark detection; the bridge is still server-side."""
+    assert _modules_loaded_by("signbridge.cli.serve_ws", ("mediapipe", "cv2")) == set()
+
+
 def test_host_does_not_import_torch():
     """The capture device runs no model, so it should not need PyTorch."""
     assert _modules_loaded_by("signbridge.cli.run_host", ("torch",)) == set()

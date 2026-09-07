@@ -11,13 +11,14 @@ dependencies = ["numpy>=1.24", "PyYAML>=6.0"]
 
 [project.optional-dependencies]
 # Install only what the machine actually needs.
-server = ["torch>=2.0"]
+server = ["torch>=2.0", "websockets>=12.0"]
 host = ["mediapipe>=0.10", "opencv-python>=4.8"]
 speech = ["pyttsx3>=2.90"]
 dev = ["pytest>=7.4"]
 
 [project.scripts]
 signbridge-serve = "signbridge.cli.serve:main"
+signbridge-serve-ws = "signbridge.cli.serve_ws:main"
 signbridge-host = "signbridge.cli.run_host:main"
 signbridge-collect = "signbridge.cli.collect:main"
 signbridge-train = "signbridge.cli.train:main"
