@@ -101,21 +101,28 @@
   .switch input:checked + .track { background: var(--accent); }
   .switch input:checked + .track::before { transform: translateX(16px); }
 
-  /* right: history log */
-  #history-panel {
+  /* right: logs (word-by-word predictions) - collapsed by default */
+  #logs-panel {
     width: 280px; flex-shrink: 0; background: var(--panel);
     border-left: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0;
+    transition: width 0.15s ease;
   }
-  #history-panel h2 {
+  #logs-panel.collapsed { width: auto; }
+  #logs-toggle {
+    all: unset; cursor: pointer; display: flex; align-items: center; justify-content: space-between;
     font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted);
-    margin: 0; padding: 12px 14px; border-bottom: 1px solid var(--border);
+    padding: 12px 14px; border-bottom: 1px solid var(--border); white-space: nowrap;
   }
-  #history-list { flex: 1; overflow-y: auto; padding: 8px 14px; }
-  .history-item { padding: 8px 0; border-bottom: 1px solid var(--border); }
-  .history-item:last-child { border-bottom: none; }
-  .history-item .word { font-size: 14px; font-weight: 600; }
-  .history-item .meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
-  #history-empty { color: var(--muted); font-size: 12px; padding: 12px 0; }
+  #logs-toggle:hover { color: var(--text); }
+  #logs-arrow { display: inline-block; transition: transform 0.15s ease; margin-left: 10px; }
+  #logs-panel.collapsed #logs-arrow { transform: rotate(-90deg); }
+  #logs-panel.collapsed #logs-toggle { border-bottom: none; }
+  #logs-list { flex: 1; overflow-y: auto; padding: 8px 14px; min-width: 0; }
+  .log-item { padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .log-item:last-child { border-bottom: none; }
+  .log-item .word { font-size: 14px; font-weight: 600; }
+  .log-item .meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  #logs-empty { color: var(--muted); font-size: 12px; padding: 12px 0; }
 
   .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 </style>
@@ -128,6 +135,9 @@
   <button id="connect-btn" class="primary">Connect</button>
   <button id="disconnect-btn" class="danger" disabled>Stop</button>
   <button id="demo-btn">Demo (no server)</button>
+  <span style="width: 1px; height: 20px; background: var(--border); margin: 0 4px;"></span>
+  <button id="start-recording-btn" class="primary" disabled>● Start Recording</button>
+  <button id="stop-recording-btn" class="danger" disabled>Stop Recording</button>
   <div class="spacer"></div>
   <div class="status"><span id="status-dot" class="status-dot"></span><span id="status-text">Disconnected</span></div>
 </header>
@@ -162,9 +172,12 @@
     </div>
   </div>
 
-  <div id="history-panel">
-    <h2>History</h2>
-    <div id="history-list"><div id="history-empty">Nothing committed yet.</div></div>
+  <div id="logs-panel" class="collapsed">
+    <button id="logs-toggle" aria-expanded="false">
+      <span>Logs <span id="logs-count">(0)</span></span>
+      <span id="logs-arrow">▾</span>
+    </button>
+    <div id="logs-list" hidden><div id="logs-empty">Nothing committed yet.</div></div>
   </div>
 </main>
 
@@ -196,7 +209,6 @@ const NUM_LANDMARKS = 2 * NUM_HAND_LANDMARKS; // 42: left 0-20, right 21-41, sam
 const COMMIT_WINDOW = 8;       // rolling window of the last N raw predictions
 const COMMIT_AGREE = 5;        // need at least this many agreeing...
 const COMMIT_CONFIDENCE = 0.75; // ...above this confidence, before a word commits
-const SENTENCE_IDLE_MS = 1500;  // sustained idle/silence before a batched sentence is spoken
 
 // ---------------------------------------------------------------------------
 // DOM handles
@@ -206,18 +218,30 @@ const wsUrlInput = el("ws-url");
 const connectBtn = el("connect-btn");
 const disconnectBtn = el("disconnect-btn");
 const demoBtn = el("demo-btn");
+const startRecordingBtn = el("start-recording-btn");
+const stopRecordingBtn = el("stop-recording-btn");
 const statusDot = el("status-dot");
 const statusText = el("status-text");
 const captionEl = el("caption");
 const subCaptionEl = el("sub-caption");
-const historyList = el("history-list");
-const historyEmpty = el("history-empty");
+const logsPanel = el("logs-panel");
+const logsToggle = el("logs-toggle");
+const logsList = el("logs-list");
+const logsEmpty = el("logs-empty");
+const logsCount = el("logs-count");
 const speakEachWordToggle = el("speak-each-word");
 const fontSizeSlider = el("font-size");
 const video = el("camera-video");
 const canvas = el("camera-canvas");
 const canvasCtx = canvas.getContext("2d");
 const handsCountEl = el("hands-count");
+let logEntryCount = 0;
+
+logsToggle.addEventListener("click", () => {
+  const collapsed = logsPanel.classList.toggle("collapsed");
+  logsList.hidden = collapsed;
+  logsToggle.setAttribute("aria-expanded", String(!collapsed));
+});
 
 fontSizeSlider.addEventListener("input", () => {
   captionEl.style.fontSize = fontSizeSlider.value + "px";
@@ -236,8 +260,8 @@ let demoTimer = null;
 
 let commitBuffer = [];      // rolling window of {label, confidence}
 let lastCommitted = null;   // last word actually committed, so a held sign doesn't spam
-let sentenceWords = [];     // accumulated words in sentence-batched mode
-let idleTimer = null;
+let sentenceWords = [];     // words appended so far in the current recording
+let recording = false;      // gated by Start/Stop Recording, independent of the connection itself
 
 // ---------------------------------------------------------------------------
 // Connection lifecycle
@@ -245,6 +269,8 @@ let idleTimer = null;
 connectBtn.addEventListener("click", () => connect().catch(onFatalError));
 disconnectBtn.addEventListener("click", () => disconnect());
 demoBtn.addEventListener("click", () => (running ? stopDemo() : startDemo()));
+startRecordingBtn.addEventListener("click", () => startRecording());
+stopRecordingBtn.addEventListener("click", () => stopRecording());
 
 async function connect() {
   if (running) return;
@@ -270,8 +296,9 @@ async function connect() {
       running = true;
       connectBtn.disabled = true;
       disconnectBtn.disabled = false;
+      startRecordingBtn.disabled = false;
       captionEl.classList.remove("placeholder");
-      captionEl.textContent = "Listening…";
+      captionEl.textContent = "Connected. Press Start Recording to begin a sentence.";
       detectLoop();
     } else if (message.type === "prediction") {
       // The server's own vote-smoothed label is message.label; this UI
@@ -291,6 +318,7 @@ async function connect() {
 
 function disconnect() {
   running = false;
+  if (recording) stopRecording();
   if (rafId !== null) cancelAnimationFrame(rafId);
   rafId = null;
   if (ws) {
@@ -302,6 +330,8 @@ function disconnect() {
   stopDemo();
   connectBtn.disabled = false;
   disconnectBtn.disabled = true;
+  startRecordingBtn.disabled = true;
+  stopRecordingBtn.disabled = true;
   setStatus("disconnected");
   captionEl.classList.add("placeholder");
   captionEl.textContent = "Connect to start captioning…";
@@ -309,7 +339,34 @@ function disconnect() {
   commitBuffer = [];
   lastCommitted = null;
   sentenceWords = [];
-  if (idleTimer) clearTimeout(idleTimer);
+}
+
+/** Begin composing a new sentence: gestures start appending to the caption in real time. */
+function startRecording() {
+  if (recording) return;
+  recording = true;
+  sentenceWords = [];
+  commitBuffer = [];
+  lastCommitted = null;
+  startRecordingBtn.disabled = true;
+  stopRecordingBtn.disabled = false;
+  captionEl.classList.remove("placeholder");
+  captionEl.textContent = "";
+  subCaptionEl.textContent = "Recording…";
+}
+
+/** End the current sentence. In sentence-batched mode this is what actually speaks it. */
+function stopRecording() {
+  if (!recording) return;
+  recording = false;
+  startRecordingBtn.disabled = !running;
+  stopRecordingBtn.disabled = true;
+  subCaptionEl.textContent = "";
+
+  if (sentenceWords.length) {
+    if (!speakEachWordToggle.checked) speak(sentenceWords.join(" "));
+    addLogEntry(`“${sentenceWords.join(" ")}”`, null, true);
+  }
 }
 
 function onFatalError(err) {
@@ -423,8 +480,9 @@ function drawPreview(result) {
 
 // ---------------------------------------------------------------------------
 // The single integration point: every raw prediction (live WS, or the
-// demo simulator below) flows through here. Everything downstream -
-// debounce, captioning, speech, history - is identical either way.
+// demo simulator below) flows through here. Every commit is logged
+// regardless of recording state; it only reaches the caption/sentence
+// while an explicit Start Recording session is active.
 // ---------------------------------------------------------------------------
 function handlePrediction(label, confidence) {
   const isSilence = !label || label === "idle";
@@ -432,14 +490,6 @@ function handlePrediction(label, confidence) {
   if (!isSilence) {
     commitBuffer.push({ label, confidence });
     if (commitBuffer.length > COMMIT_WINDOW) commitBuffer.shift();
-  } else {
-    // A run of silence/idle is itself the signal that ends a sentence in
-    // batched mode - handled by the idle timer below, not the vote buffer.
-  }
-
-  if (idleTimer) clearTimeout(idleTimer);
-  if (isSilence && sentenceWords.length && !speakEachWordToggle.checked) {
-    idleTimer = setTimeout(flushSentence, SENTENCE_IDLE_MS);
   }
 
   const counts = new Map();
@@ -458,31 +508,24 @@ function handlePrediction(label, confidence) {
 
 function commitWord(label, confidence) {
   lastCommitted = label;
-  addHistoryEntry(label, confidence);
+  addLogEntry(label, confidence);
+  if (!recording) return;
 
-  if (speakEachWordToggle.checked) {
-    captionEl.textContent = label;
-    speak(label);
-  } else {
-    sentenceWords.push(label);
-    captionEl.textContent = sentenceWords.join(" ");
-  }
+  sentenceWords.push(label);
+  captionEl.textContent = sentenceWords.join(" ");
+  if (speakEachWordToggle.checked) speak(label);
 }
 
-function flushSentence() {
-  if (!sentenceWords.length) return;
-  const sentence = sentenceWords.join(" ");
-  speak(sentence);
-  sentenceWords = [];
-}
-
-function addHistoryEntry(label, confidence) {
-  historyEmpty.remove();
+function addLogEntry(text, confidence, isSentence = false) {
+  logsEmpty.remove();
   const item = document.createElement("div");
-  item.className = "history-item";
+  item.className = "log-item";
   const time = new Date().toLocaleTimeString();
-  item.innerHTML = `<div class="word">${escapeHtml(label)}</div><div class="meta">${time} · ${(confidence * 100).toFixed(0)}%</div>`;
-  historyList.prepend(item);
+  const meta = isSentence ? `${time} · sentence` : `${time} · ${(confidence * 100).toFixed(0)}%`;
+  item.innerHTML = `<div class="word">${escapeHtml(text)}</div><div class="meta">${meta}</div>`;
+  logsList.prepend(item);
+  logEntryCount += 1;
+  logsCount.textContent = `(${logEntryCount})`;
 }
 
 function escapeHtml(text) {
@@ -504,7 +547,7 @@ function speak(text) {
 
 // ---------------------------------------------------------------------------
 // Demo mode: exercises the exact same handlePrediction() path with fake
-// data, so the UI (debounce, captions, speech, history) can be checked
+// data, so the UI (debounce, captions, speech, logs) can be checked
 // without a camera or a running server.
 // ---------------------------------------------------------------------------
 function startDemo() {
@@ -512,9 +555,10 @@ function startDemo() {
   running = true;
   demoBtn.textContent = "Stop demo";
   connectBtn.disabled = true;
+  startRecordingBtn.disabled = false;
   setStatus("live");
   captionEl.classList.remove("placeholder");
-  captionEl.textContent = "Listening… (demo)";
+  captionEl.textContent = "Connected (demo). Press Start Recording to begin a sentence.";
 
   const words = ["hello", "yes", "no", "thankyou", "idle"];
   demoTimer = setInterval(() => {
@@ -529,8 +573,11 @@ function stopDemo() {
   demoTimer = null;
   demoBtn.textContent = "Demo (no server)";
   if (!ws) {
+    if (recording) stopRecording();
     running = false;
     connectBtn.disabled = false;
+    startRecordingBtn.disabled = true;
+    stopRecordingBtn.disabled = true;
     setStatus("disconnected");
     captionEl.classList.add("placeholder");
     captionEl.textContent = "Connect to start captioning…";

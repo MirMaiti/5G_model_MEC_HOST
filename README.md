@@ -253,10 +253,15 @@ cd web && python -m http.server 8000
 
 Open `http://localhost:8000` in a browser, point the address field at the
 bridge (`ws://<mec-host>:8765` by default), and click **Connect**. It asks
-for camera permission, starts captioning live, and speaks each recognised
-sign — or batches them into sentences, via the toggle — through the
-browser's own text-to-speech, entirely client-side. A **Demo (no server)**
-button exercises the same caption/speech/history pipeline with fake
+for camera permission and starts the model running, but nothing is captioned
+yet — press **Start Recording** to begin composing a sentence: each
+recognised sign appends to the caption live. **Stop Recording** ends it; in
+sentence-batched mode (the "Speak each word" toggle off) that's the moment
+the whole sentence is actually spoken, through the browser's own
+text-to-speech, entirely client-side. Every recognised word is logged with
+its confidence regardless of whether you're recording, in a **Logs** panel
+that's collapsed by default — click it to expand. A **Demo (no server)**
+button exercises the same start/stop/caption/speech/logs pipeline with fake
 predictions, useful for checking the UI with no camera or trained model at
 hand. See [`web/index.html`](web/index.html) for the wire format and the
 `handlePrediction()` integration point.
