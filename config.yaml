@@ -62,10 +62,10 @@ server:
   checkpoint: models/best.pt
   device: null
   window_size: 45          # rolling buffer depth
-  inference_interval: 5    # run the model every N frames
+  inference_interval: 2    # run the model every N frames
   min_buffer: 20           # frames before the first prediction
-  vote_window: 5           # majority vote over recent predictions
-  min_confidence: 0.6      # below this, report silence rather than guess
+  vote_window: 6           # majority vote over recent predictions
+  min_confidence: 0.70      # below this, report silence rather than guess
   max_connections: 8
 
 tts:
