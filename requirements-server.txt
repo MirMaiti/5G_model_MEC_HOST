@@ -1,3 +1,6 @@
 # The MEC server. No camera stack: it never sees a pixel.
 -r requirements-core.txt
 torch>=2.0
+
+# For the browser web UI's WebSocket bridge (signbridge.cli.serve_ws).
+websockets>=12.0

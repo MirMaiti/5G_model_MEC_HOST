@@ -230,6 +230,42 @@ and the speech output without a signer:
 python -m signbridge.cli.run_host --source replay --clips data/train/hello --fps 30
 ```
 
+**Browser client, instead of the Python capture host.** A browser can't open
+the raw TCP socket the host uses, so there's a second, independent front door
+onto the same model: a WebSocket bridge, plus a self-contained web page that
+does its own hand-landmark detection (MediaPipe Tasks Vision, in-browser,
+WASM — no separate capture process). Needs `websockets`
+(`pip install websockets`, or install the `server` extra).
+
+On the MEC server:
+
+```bash
+python -m signbridge.cli.serve_ws --config config.yaml
+```
+
+Then serve the page itself from `web/` — it needs a real `http(s)://` origin
+rather than opened directly as a `file://` (the browser's camera permission
+and the MediaPipe WASM runtime both expect one):
+
+```bash
+cd web && python -m http.server 8000
+```
+
+Open `http://localhost:8000` in a browser, point the address field at the
+bridge (`ws://<mec-host>:8765` by default), and click **Connect**. It asks
+for camera permission and starts the model running, but nothing is captioned
+yet — press **Start Recording** to begin composing a sentence: each
+recognised sign appends to the caption live. **Stop Recording** ends it; in
+sentence-batched mode (the "Speak each word" toggle off) that's the moment
+the whole sentence is actually spoken, through the browser's own
+text-to-speech, entirely client-side. Every recognised word is logged with
+its confidence regardless of whether you're recording, in a **Logs** panel
+that's collapsed by default — click it to expand. A **Demo (no server)**
+button exercises the same start/stop/caption/speech/logs pipeline with fake
+predictions, useful for checking the UI with no camera or trained model at
+hand. See [`web/index.html`](web/index.html) for the wire format and the
+`handlePrediction()` integration point.
+
 ---
 
 ## 6. Data format
@@ -349,13 +385,17 @@ signbridge/
   server/            MEC side
     predictor.py       the model seam
     session.py         per-connection buffer and smoothing
-    tcp_server.py      the threaded TCP server
+    tcp_server.py      the threaded TCP server, for the Python capture host
+    ws_server.py        the WebSocket bridge, for the browser web UI
 
   host/
     client.py          the TCP client and session loop
     tts.py             speech backends and the gating rules
 
-  cli/               collect, train, serve, run_host, fetch_models
+  cli/               collect, train, serve, serve_ws, run_host, fetch_models
+
+web/
+  index.html         browser client: in-browser hand tracking, captions, speech
 ```
 
 ---

@@ -1,0 +1,602 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SignBridge — Live Captions</title>
+<style>
+  :root {
+    --bg: #0b0d10;
+    --panel: #14171c;
+    --panel-2: #1b1f26;
+    --border: #2a2f38;
+    --text: #eef1f5;
+    --muted: #8b93a1;
+    --accent: #4da3ff;
+    --accent-dim: #1f3a56;
+    --good: #35c46a;
+    --bad: #e5534b;
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: var(--font);
+  }
+  body {
+    display: flex; flex-direction: column;
+  }
+
+  /* ---------- top bar: connection controls ---------- */
+  header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+  header h1 { font-size: 15px; font-weight: 600; margin: 0 12px 0 0; color: var(--muted); letter-spacing: 0.02em; }
+  header input[type="text"] {
+    background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 6px; padding: 6px 10px; font-size: 13px; width: 220px;
+  }
+  button {
+    border: 1px solid var(--border); background: var(--panel-2); color: var(--text);
+    border-radius: 6px; padding: 7px 14px; font-size: 13px; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #0b0d10; font-weight: 600; }
+  button.danger { background: var(--bad); border-color: var(--bad); color: white; }
+  .status-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--bad); display: inline-block; margin-right: 6px; }
+  .status-dot.live { background: var(--good); box-shadow: 0 0 6px var(--good); }
+  .status { font-size: 12px; color: var(--muted); display: flex; align-items: center; }
+  .spacer { flex: 1; }
+
+  /* ---------- main layout ---------- */
+  main {
+    flex: 1; display: flex; min-height: 0;
+  }
+
+  /* left: small utility panel - camera is NOT the hero */
+  #camera-panel {
+    width: 260px; flex-shrink: 0; background: var(--panel);
+    border-right: 1px solid var(--border); padding: 12px; display: flex; flex-direction: column; gap: 10px;
+  }
+  #camera-wrap { position: relative; width: 100%; aspect-ratio: 4/3; background: #000; border-radius: 8px; overflow: hidden; }
+  #camera-wrap video, #camera-wrap canvas {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    transform: scaleX(-1); /* mirror, for the signer's comfort */
+  }
+  #camera-panel .hint { font-size: 11px; color: var(--muted); line-height: 1.5; }
+  #hands-badge { font-size: 12px; color: var(--muted); }
+  #hands-badge b { color: var(--text); }
+
+  /* center: the hero - captions */
+  #stage {
+    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 24px; min-width: 0; position: relative;
+  }
+  #caption-box {
+    width: 100%; max-width: 900px; aspect-ratio: 3 / 1;
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 14px;
+    display: flex; align-items: center; justify-content: center;
+    padding: 20px 36px; overflow-y: auto;
+  }
+  #caption {
+    text-align: center; font-weight: 600; line-height: 1.3; max-width: 100%;
+    word-wrap: break-word; transition: font-size 0.15s ease;
+  }
+  #caption.placeholder { color: var(--muted); font-weight: 400; }
+  #sub-caption { margin-top: 14px; font-size: 14px; color: var(--muted); min-height: 18px; }
+
+  #stage-controls {
+    position: absolute; bottom: 18px; right: 18px; display: flex; align-items: center; gap: 14px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 8px 14px;
+    font-size: 12px; color: var(--muted);
+  }
+  #stage-controls label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  #stage-controls input[type="range"] { width: 90px; }
+  .switch { position: relative; width: 34px; height: 18px; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .switch .track {
+    position: absolute; inset: 0; background: var(--border); border-radius: 999px; transition: 0.15s;
+  }
+  .switch .track::before {
+    content: ""; position: absolute; width: 14px; height: 14px; left: 2px; top: 2px;
+    background: var(--text); border-radius: 50%; transition: 0.15s;
+  }
+  .switch input:checked + .track { background: var(--accent); }
+  .switch input:checked + .track::before { transform: translateX(16px); }
+
+  /* right: logs (word-by-word predictions) - collapsed by default */
+  #logs-panel {
+    width: 280px; flex-shrink: 0; background: var(--panel);
+    border-left: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0;
+    transition: width 0.15s ease;
+  }
+  #logs-panel.collapsed { width: auto; }
+  #logs-toggle {
+    all: unset; cursor: pointer; display: flex; align-items: center; justify-content: space-between;
+    font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted);
+    padding: 12px 14px; border-bottom: 1px solid var(--border); white-space: nowrap;
+  }
+  #logs-toggle:hover { color: var(--text); }
+  #logs-arrow { display: inline-block; transition: transform 0.15s ease; margin-left: 10px; }
+  #logs-panel.collapsed #logs-arrow { transform: rotate(-90deg); }
+  #logs-panel.collapsed #logs-toggle { border-bottom: none; }
+  #logs-list { flex: 1; overflow-y: auto; padding: 8px 14px; min-width: 0; }
+  .log-item { padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .log-item:last-child { border-bottom: none; }
+  .log-item .word { font-size: 14px; font-weight: 600; }
+  .log-item .meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  #logs-empty { color: var(--muted); font-size: 12px; padding: 12px 0; }
+
+  .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>SIGNBRIDGE · LIVE</h1>
+  <input id="ws-url" type="text" value="ws://localhost:8765" spellcheck="false" />
+  <button id="connect-btn" class="primary">Connect</button>
+  <button id="disconnect-btn" class="danger" disabled>Stop</button>
+  <button id="demo-btn">Demo (no server)</button>
+  <span style="width: 1px; height: 20px; background: var(--border); margin: 0 4px;"></span>
+  <button id="start-recording-btn" class="primary" disabled>● Start Recording</button>
+  <button id="stop-recording-btn" class="danger" disabled>Stop Recording</button>
+  <div class="spacer"></div>
+  <div class="status"><span id="status-dot" class="status-dot"></span><span id="status-text">Disconnected</span></div>
+</header>
+
+<main>
+  <div id="camera-panel">
+    <div id="camera-wrap">
+      <video id="camera-video" autoplay playsinline muted></video>
+      <canvas id="camera-canvas"></canvas>
+    </div>
+    <div id="hands-badge">Hands detected: <b id="hands-count">0</b></div>
+    <div class="hint">
+      Camera + landmark preview is just a sanity check that MediaPipe sees
+      your hands — the caption is what matters. Nothing here leaves your
+      browser except the 42 landmark coordinates sent to the server.
+    </div>
+  </div>
+
+  <div id="stage">
+    <div id="caption-box">
+      <div id="caption" class="placeholder">Connect to start captioning…</div>
+    </div>
+    <div id="sub-caption"></div>
+
+    <div id="stage-controls">
+      <label class="switch">
+        <input id="speak-each-word" type="checkbox" checked />
+        <span class="track"></span>
+      </label>
+      <span>Speak each word</span>
+      <label>Caption size
+        <input id="font-size" type="range" min="24" max="96" value="48" />
+      </label>
+    </div>
+  </div>
+
+  <div id="logs-panel" class="collapsed">
+    <button id="logs-toggle" aria-expanded="false">
+      <span>Logs <span id="logs-count">(0)</span></span>
+      <span id="logs-arrow">▾</span>
+    </button>
+    <div id="logs-list" hidden><div id="logs-empty">Nothing committed yet.</div></div>
+  </div>
+</main>
+
+<script type="module">
+// ============================================================================
+// SignBridge web UI
+//
+// Architecture in one paragraph: the browser does its own hand-landmark
+// detection (MediaPipe Tasks Vision, WASM, no server round trip for that
+// part), packs each frame into the exact (42, 3) landmarks + (42,) mask
+// shape signbridge.features.FeatureExtractor expects, and sends it over a
+// WebSocket to signbridge.cli.serve_ws — the same trained model the Python
+// capture host talks to over raw TCP, just reachable from a browser. The
+// server does its own vote-smoothing (server.vote_window in config.yaml);
+// this page adds a *second*, independent debounce layer on the raw
+// per-tick prediction, per the spec below, since a browser client and a
+// from-Python client have different noise/latency characteristics worth
+// insulating against separately.
+// ============================================================================
+
+import { HandLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+
+const HAND_MODEL_URL =
+  "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
+const NUM_HAND_LANDMARKS = 21;
+const NUM_LANDMARKS = 2 * NUM_HAND_LANDMARKS; // 42: left 0-20, right 21-41, same as the Python side
+
+// ---- commit/debounce tuning (see the design notes this UI was built from) ----
+const COMMIT_WINDOW = 8;       // rolling window of the last N raw predictions
+const COMMIT_AGREE = 5;        // need at least this many agreeing...
+const COMMIT_CONFIDENCE = 0.75; // ...above this confidence, before a word commits
+
+// ---------------------------------------------------------------------------
+// DOM handles
+// ---------------------------------------------------------------------------
+const el = (id) => document.getElementById(id);
+const wsUrlInput = el("ws-url");
+const connectBtn = el("connect-btn");
+const disconnectBtn = el("disconnect-btn");
+const demoBtn = el("demo-btn");
+const startRecordingBtn = el("start-recording-btn");
+const stopRecordingBtn = el("stop-recording-btn");
+const statusDot = el("status-dot");
+const statusText = el("status-text");
+const captionEl = el("caption");
+const captionBoxEl = el("caption-box");
+const subCaptionEl = el("sub-caption");
+const logsPanel = el("logs-panel");
+const logsToggle = el("logs-toggle");
+const logsList = el("logs-list");
+const logsEmpty = el("logs-empty");
+const logsCount = el("logs-count");
+const speakEachWordToggle = el("speak-each-word");
+const fontSizeSlider = el("font-size");
+const video = el("camera-video");
+const canvas = el("camera-canvas");
+const canvasCtx = canvas.getContext("2d");
+const handsCountEl = el("hands-count");
+let logEntryCount = 0;
+
+logsToggle.addEventListener("click", () => {
+  const collapsed = logsPanel.classList.toggle("collapsed");
+  logsList.hidden = collapsed;
+  logsToggle.setAttribute("aria-expanded", String(!collapsed));
+});
+
+fontSizeSlider.addEventListener("input", () => {
+  captionEl.style.fontSize = fontSizeSlider.value + "px";
+});
+captionEl.style.fontSize = fontSizeSlider.value + "px";
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+let ws = null;
+let handLandmarker = null;
+let mediaStream = null;
+let rafId = null;
+let running = false;
+let demoTimer = null;
+
+let commitBuffer = [];      // rolling window of {label, confidence}
+let lastCommitted = null;   // last word actually committed, so a held sign doesn't spam
+let sentenceWords = [];     // words appended so far in the current recording
+let recording = false;      // gated by Start/Stop Recording, independent of the connection itself
+
+// ---------------------------------------------------------------------------
+// Connection lifecycle
+// ---------------------------------------------------------------------------
+connectBtn.addEventListener("click", () => connect().catch(onFatalError));
+disconnectBtn.addEventListener("click", () => disconnect());
+demoBtn.addEventListener("click", () => (running ? stopDemo() : startDemo()));
+startRecordingBtn.addEventListener("click", () => startRecording());
+stopRecordingBtn.addEventListener("click", () => stopRecording());
+
+async function connect() {
+  if (running) return;
+  setStatus("connecting");
+
+  await startCamera();
+  await loadHandLandmarker();
+
+  const url = wsUrlInput.value.trim();
+  ws = new WebSocket(url);
+  ws.onopen = () => {
+    ws.send(JSON.stringify({ type: "hello", layout: "hands" }));
+  };
+  ws.onmessage = (event) => {
+    let message;
+    try {
+      message = JSON.parse(event.data);
+    } catch {
+      return;
+    }
+    if (message.type === "welcome") {
+      setStatus("live");
+      running = true;
+      connectBtn.disabled = true;
+      disconnectBtn.disabled = false;
+      startRecordingBtn.disabled = false;
+      captionEl.classList.remove("placeholder");
+      captionEl.textContent = "Connected. Press Start Recording to begin a sentence.";
+      detectLoop();
+    } else if (message.type === "prediction") {
+      // The server's own vote-smoothed label is message.label; this UI
+      // debounces on the raw per-tick guess itself (message.raw_label),
+      // so its commit logic is independent of - not stacked on top of -
+      // whatever smoothing the server config applies.
+      handlePrediction(message.raw_label || "", message.confidence || 0);
+    } else if (message.type === "error") {
+      console.error("Server error:", message.error);
+    }
+  };
+  ws.onerror = () => onFatalError(new Error("WebSocket connection failed."));
+  ws.onclose = () => {
+    if (running) disconnect();
+  };
+}
+
+function disconnect() {
+  running = false;
+  if (recording) stopRecording();
+  if (rafId !== null) cancelAnimationFrame(rafId);
+  rafId = null;
+  if (ws) {
+    try { ws.send(JSON.stringify({ type: "reset" })); } catch {}
+    ws.close();
+  }
+  ws = null;
+  stopCamera();
+  stopDemo();
+  connectBtn.disabled = false;
+  disconnectBtn.disabled = true;
+  startRecordingBtn.disabled = true;
+  stopRecordingBtn.disabled = true;
+  setStatus("disconnected");
+  captionEl.classList.add("placeholder");
+  captionEl.textContent = "Connect to start captioning…";
+  subCaptionEl.textContent = "";
+  commitBuffer = [];
+  lastCommitted = null;
+  sentenceWords = [];
+}
+
+/** Begin composing a new sentence: gestures start appending to the caption in real time. */
+function startRecording() {
+  if (recording) return;
+  recording = true;
+  sentenceWords = [];
+  commitBuffer = [];
+  lastCommitted = null;
+  startRecordingBtn.disabled = true;
+  stopRecordingBtn.disabled = false;
+  captionEl.classList.remove("placeholder");
+  captionEl.textContent = "";
+  captionBoxEl.scrollTop = 0;
+  subCaptionEl.textContent = "Recording…";
+}
+
+/** End the current sentence. In sentence-batched mode this is what actually speaks it. */
+function stopRecording() {
+  if (!recording) return;
+  recording = false;
+  startRecordingBtn.disabled = !running;
+  stopRecordingBtn.disabled = true;
+  subCaptionEl.textContent = "";
+
+  if (sentenceWords.length) {
+    if (!speakEachWordToggle.checked) speak(sentenceWords.join(" "));
+    addLogEntry(`“${sentenceWords.join(" ")}”`, null, true);
+  }
+}
+
+function onFatalError(err) {
+  console.error(err);
+  subCaptionEl.textContent = String(err.message || err);
+  disconnect();
+}
+
+function setStatus(state) {
+  statusDot.classList.toggle("live", state === "live");
+  statusText.textContent = { connecting: "Connecting…", live: "Live", disconnected: "Disconnected" }[state] || state;
+}
+
+// ---------------------------------------------------------------------------
+// Camera + in-browser hand landmarking
+// ---------------------------------------------------------------------------
+async function startCamera() {
+  mediaStream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 }, audio: false });
+  video.srcObject = mediaStream;
+  await video.play();
+  canvas.width = video.videoWidth || 640;
+  canvas.height = video.videoHeight || 480;
+}
+
+function stopCamera() {
+  if (mediaStream) {
+    mediaStream.getTracks().forEach((track) => track.stop());
+    mediaStream = null;
+  }
+  video.srcObject = null;
+  canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
+}
+
+async function loadHandLandmarker() {
+  if (handLandmarker) return;
+  const vision = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+  );
+  handLandmarker = await HandLandmarker.createFromOptions(vision, {
+    baseOptions: { modelAssetPath: HAND_MODEL_URL, delegate: "CPU" },
+    runningMode: "VIDEO",
+    numHands: 2,
+  });
+}
+
+function detectLoop() {
+  if (!running) return;
+  const now = performance.now();
+  const result = handLandmarker.detectForVideo(video, now);
+  const { landmarks, mask, handsDetected } = assemble(result);
+
+  drawPreview(result);
+  handsCountEl.textContent = String(handsDetected);
+
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: "frame", landmarks, mask }));
+  }
+  rafId = requestAnimationFrame(detectLoop);
+}
+
+/** Turn one MediaPipe Tasks result into the canonical (42,3) + (42,) tensors, matching signbridge.capture.mediapipe_source.assemble exactly. */
+function assemble(result) {
+  const landmarks = Array.from({ length: NUM_LANDMARKS }, () => [0, 0, 0]);
+  const mask = new Array(NUM_LANDMARKS).fill(0);
+  let handsDetected = 0;
+
+  const handList = result.landmarks || [];
+  const handedness = result.handedness || [];
+  for (let i = 0; i < handList.length; i++) {
+    const categories = handedness[i];
+    if (!categories || !categories.length) continue;
+    const isLeft = categories[0].categoryName === "Left";
+    const start = isLeft ? 0 : NUM_HAND_LANDMARKS;
+    const points = handList[i];
+    for (let j = 0; j < NUM_HAND_LANDMARKS && j < points.length; j++) {
+      landmarks[start + j] = [points[j].x, points[j].y, points[j].z];
+      mask[start + j] = 1;
+    }
+    handsDetected += 1;
+  }
+  return { landmarks, mask, handsDetected };
+}
+
+function drawPreview(result) {
+  canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
+  const connections = [
+    [0, 1], [1, 2], [2, 3], [3, 4],
+    [0, 5], [5, 6], [6, 7], [7, 8],
+    [5, 9], [9, 10], [10, 11], [11, 12],
+    [9, 13], [13, 14], [14, 15], [15, 16],
+    [13, 17], [17, 18], [18, 19], [19, 20],
+    [0, 17],
+  ];
+  for (const points of result.landmarks || []) {
+    canvasCtx.strokeStyle = "#4da3ff";
+    canvasCtx.lineWidth = 2;
+    for (const [a, b] of connections) {
+      canvasCtx.beginPath();
+      canvasCtx.moveTo(points[a].x * canvas.width, points[a].y * canvas.height);
+      canvasCtx.lineTo(points[b].x * canvas.width, points[b].y * canvas.height);
+      canvasCtx.stroke();
+    }
+    canvasCtx.fillStyle = "#eef1f5";
+    for (const p of points) {
+      canvasCtx.beginPath();
+      canvasCtx.arc(p.x * canvas.width, p.y * canvas.height, 2.5, 0, Math.PI * 2);
+      canvasCtx.fill();
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The single integration point: every raw prediction (live WS, or the
+// demo simulator below) flows through here. Every commit is logged
+// regardless of recording state; it only reaches the caption/sentence
+// while an explicit Start Recording session is active.
+// ---------------------------------------------------------------------------
+function handlePrediction(label, confidence) {
+  const isSilence = !label || label === "idle";
+
+  if (!isSilence) {
+    commitBuffer.push({ label, confidence });
+    if (commitBuffer.length > COMMIT_WINDOW) commitBuffer.shift();
+  }
+
+  const counts = new Map();
+  for (const entry of commitBuffer) {
+    if (entry.confidence < COMMIT_CONFIDENCE) continue;
+    counts.set(entry.label, (counts.get(entry.label) || 0) + 1);
+  }
+  for (const [candidate, count] of counts) {
+    if (count >= COMMIT_AGREE && candidate !== lastCommitted) {
+      commitWord(candidate, confidence);
+      commitBuffer = []; // require a fresh window before the same word can commit again
+      break;
+    }
+  }
+}
+
+function commitWord(label, confidence) {
+  lastCommitted = label;
+  addLogEntry(label, confidence);
+  if (!recording) return;
+
+  sentenceWords.push(label);
+  captionEl.textContent = sentenceWords.join(" ");
+  captionBoxEl.scrollTop = captionBoxEl.scrollHeight; // keep the newest word in view
+  if (speakEachWordToggle.checked) speak(label);
+}
+
+function addLogEntry(text, confidence, isSentence = false) {
+  logsEmpty.remove();
+  const item = document.createElement("div");
+  item.className = "log-item";
+  const time = new Date().toLocaleTimeString();
+  const meta = isSentence ? `${time} · sentence` : `${time} · ${(confidence * 100).toFixed(0)}%`;
+  item.innerHTML = `<div class="word">${escapeHtml(text)}</div><div class="meta">${meta}</div>`;
+  logsList.prepend(item);
+  logEntryCount += 1;
+  logsCount.textContent = `(${logEntryCount})`;
+}
+
+function escapeHtml(text) {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// ---------------------------------------------------------------------------
+// Speech (Web Speech API, entirely client-side - no round trip through the
+// MEC for audio, works even on a degraded link, matches the landmarks-only
+// privacy stance the rest of the project already takes)
+// ---------------------------------------------------------------------------
+function speak(text) {
+  if (!("speechSynthesis" in window) || !text) return;
+  const utterance = new SpeechSynthesisUtterance(text);
+  window.speechSynthesis.speak(utterance);
+}
+
+// ---------------------------------------------------------------------------
+// Demo mode: exercises the exact same handlePrediction() path with fake
+// data, so the UI (debounce, captions, speech, logs) can be checked
+// without a camera or a running server.
+// ---------------------------------------------------------------------------
+function startDemo() {
+  if (running) return;
+  running = true;
+  demoBtn.textContent = "Stop demo";
+  connectBtn.disabled = true;
+  startRecordingBtn.disabled = false;
+  setStatus("live");
+  captionEl.classList.remove("placeholder");
+  captionEl.textContent = "Connected (demo). Press Start Recording to begin a sentence.";
+
+  const words = ["hello", "yes", "no", "thankyou", "idle"];
+  demoTimer = setInterval(() => {
+    const label = words[Math.floor(Math.random() * words.length)];
+    const confidence = 0.7 + Math.random() * 0.3;
+    handlePrediction(label, confidence);
+  }, 150); // ~ the 15fps-ish tick rate a live classifier would produce
+}
+
+function stopDemo() {
+  if (demoTimer) clearInterval(demoTimer);
+  demoTimer = null;
+  demoBtn.textContent = "Demo (no server)";
+  if (!ws) {
+    if (recording) stopRecording();
+    running = false;
+    connectBtn.disabled = false;
+    startRecordingBtn.disabled = true;
+    stopRecordingBtn.disabled = true;
+    setStatus("disconnected");
+    captionEl.classList.add("placeholder");
+    captionEl.textContent = "Connect to start captioning…";
+    commitBuffer = [];
+    lastCommitted = null;
+    sentenceWords = [];
+  }
+}
+</script>
+</body>
+</html>
