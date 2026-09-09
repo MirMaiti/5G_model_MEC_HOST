@@ -4,190 +4,358 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>SignBridge — Live Captions</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600&family=Lora:wght@400;600&display=swap" />
+<script src="https://unpkg.com/lucide@0.454.0/dist/umd/lucide.js"></script>
 <style>
-  :root {
-    --bg: #0b0d10;
-    --panel: #14171c;
-    --panel-2: #1b1f26;
-    --border: #2a2f38;
-    --text: #eef1f5;
-    --muted: #8b93a1;
-    --accent: #4da3ff;
-    --accent-dim: #1f3a56;
-    --good: #35c46a;
-    --bad: #e5534b;
-    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  }
-  * { box-sizing: border-box; }
-  html, body {
-    margin: 0; height: 100%; background: var(--bg); color: var(--text);
-    font-family: var(--font);
-  }
-  body {
-    display: flex; flex-direction: column;
-  }
+/* ==========================================================================
+   Classical design system (dark retheme) — see
+   "Gesture to speech UI mockups/design_handoff_signbridge_captions/README.md"
+   for the full token/spec rationale. Inlined here rather than linked, per
+   that handoff's own instruction to keep this a single-file client.
+   ========================================================================== */
+:root {
+  --color-bg: #191817;      --color-surface: #211f1e;
+  --color-text: #ece9e4;    --color-accent: #e1ad66;
+  --color-divider: color-mix(in srgb, #ece9e4 15%, transparent);
+  --color-neutral-100: #2d2b2b; --color-neutral-200: #232121;
+  --color-neutral-300: #333030;  --color-neutral-400: #4a4646;
+  --color-neutral-500: #6b6767;  --color-neutral-600: #8f8b8a;
+  --color-neutral-700: #b3aeab;  --color-neutral-800: #d3cfca;
+  --color-neutral-900: #ece9e4;
+  --color-accent-100: #2a231a;   --color-accent-200: #3a2f20;
+  --color-accent-300: #6b5330;   --color-accent-700: #e1ad66;
+  --color-accent-800: #f0cd9b;
+  --shadow-lg: 0 12px 32px rgba(0,0,0,.5);
 
-  /* ---------- top bar: connection controls ---------- */
-  header {
-    display: flex; align-items: center; gap: 10px;
-    padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--border);
-    flex-wrap: wrap;
-  }
-  header h1 { font-size: 15px; font-weight: 600; margin: 0 12px 0 0; color: var(--muted); letter-spacing: 0.02em; }
-  header input[type="text"] {
-    background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
-    border-radius: 6px; padding: 6px 10px; font-size: 13px; width: 220px;
-  }
-  button {
-    border: 1px solid var(--border); background: var(--panel-2); color: var(--text);
-    border-radius: 6px; padding: 7px 14px; font-size: 13px; cursor: pointer;
-  }
-  button:hover { border-color: var(--accent); }
-  button:disabled { opacity: 0.4; cursor: not-allowed; }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #0b0d10; font-weight: 600; }
-  button.danger { background: var(--bad); border-color: var(--bad); color: white; }
-  .status-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--bad); display: inline-block; margin-right: 6px; }
-  .status-dot.live { background: var(--good); box-shadow: 0 0 6px var(--good); }
-  .status { font-size: 12px; color: var(--muted); display: flex; align-items: center; }
-  .spacer { flex: 1; }
+  --font-heading: "Cormorant Garamond", system-ui, serif;
+  --font-body: "Lora", system-ui, serif;
 
-  /* ---------- main layout ---------- */
-  main {
-    flex: 1; display: flex; min-height: 0;
-  }
+  --space-1: 4.6px; --space-2: 9.2px; --space-3: 13.8px;
+  --space-4: 18.4px; --space-6: 27.6px; --space-8: 36.8px;
+  --radius-sm: 2px; --radius-md: 2px;
+}
+* , *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; } /* several elements below also set display:flex via a class; without this, that class wins the cascade tie against the UA [hidden] rule and the element stays visible */
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--color-bg); color: var(--color-text); font-family: var(--font-body);
+  font-size: 15px; line-height: 1.55; display: flex; flex-direction: column; overflow: hidden;
+}
+h6 {
+  font-family: var(--font-heading); font-weight: 600; font-size: 13px;
+  letter-spacing: 0.08em; text-transform: uppercase; margin: 0;
+  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+}
+p { margin: 0; }
+.tnum { font-variant-numeric: tabular-nums; }
+.muted-55 { color: color-mix(in srgb, var(--color-text) 55%, transparent); }
+.muted-60 { color: color-mix(in srgb, var(--color-text) 60%, transparent); }
+:focus { outline: none; }
+:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.hr { height: 1px; border: 0; margin: var(--space-4) 0; background: var(--color-divider); }
 
-  /* left: small utility panel - camera is NOT the hero */
-  #camera-panel {
-    width: 260px; flex-shrink: 0; background: var(--panel);
-    border-right: 1px solid var(--border); padding: 12px; display: flex; flex-direction: column; gap: 10px;
-  }
-  #camera-wrap { position: relative; width: 100%; aspect-ratio: 4/3; background: #000; border-radius: 8px; overflow: hidden; }
-  #camera-wrap video, #camera-wrap canvas {
-    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-    transform: scaleX(-1); /* mirror, for the signer's comfort */
-  }
-  #camera-panel .hint { font-size: 11px; color: var(--muted); line-height: 1.5; }
-  #hands-badge { font-size: 12px; color: var(--muted); }
-  #hands-badge b { color: var(--text); }
+/* — buttons — */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  cursor: pointer; text-decoration: none; white-space: nowrap;
+  font-family: var(--font-heading); font-weight: 600; font-size: 14px; line-height: 1.2;
+  color: var(--color-text); background: transparent; border: 1px solid transparent;
+  padding: var(--space-2) calc(var(--space-3) * 1.2); border-radius: var(--radius-md);
+}
+.btn svg { display: block; width: 14px; height: 14px; }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn-primary { color: var(--color-accent); border-color: var(--color-accent); }
+.btn-primary:hover:not(:disabled) { background: color-mix(in srgb, var(--color-accent) 12%, transparent); }
+.btn-primary:active:not(:disabled) { background: color-mix(in srgb, var(--color-accent) 22%, transparent); }
+.btn-secondary { border-color: var(--color-divider); }
+.btn-secondary:hover:not(:disabled) { background: color-mix(in srgb, var(--color-text) 7%, transparent); }
+.btn-secondary.accent-outline { border-color: var(--color-accent); color: var(--color-accent); }
+.btn-ghost { color: var(--color-accent); padding-inline: var(--space-1); }
+.btn-ghost:hover { background: color-mix(in srgb, var(--color-accent) 10%, transparent); }
 
-  /* center: the hero - captions */
-  #stage {
-    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
-    padding: 24px; min-width: 0; position: relative;
-  }
-  #caption-box {
-    width: 100%; max-width: 900px; aspect-ratio: 3 / 1;
-    background: var(--panel-2); border: 1px solid var(--border); border-radius: 14px;
-    display: flex; align-items: center; justify-content: center;
-    padding: 20px 36px; overflow-y: auto;
-  }
-  #caption {
-    text-align: center; font-weight: 600; line-height: 1.3; max-width: 100%;
-    word-wrap: break-word; transition: font-size 0.15s ease;
-  }
-  #caption.placeholder { color: var(--muted); font-weight: 400; }
-  #sub-caption { margin-top: 14px; font-size: 14px; color: var(--muted); min-height: 18px; }
+/* — inputs — */
+.input {
+  min-height: 36px; padding: 6px 10px; font: inherit; font-size: 14px;
+  color: var(--color-text); caret-color: var(--color-accent); background: transparent;
+  border: 1px solid var(--color-divider); border-radius: var(--radius-md);
+}
+.input:hover { border-color: color-mix(in srgb, var(--color-text) 45%, transparent); }
+.input:focus-visible { border-color: var(--color-accent); outline-offset: 0; }
+.input.focused { border-color: var(--color-accent); outline: 2px solid var(--color-accent); outline-offset: 0; }
 
-  #stage-controls {
-    position: absolute; bottom: 18px; right: 18px; display: flex; align-items: center; gap: 14px;
-    background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 8px 14px;
-    font-size: 12px; color: var(--muted);
-  }
-  #stage-controls label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
-  #stage-controls input[type="range"] { width: 90px; }
-  .switch { position: relative; width: 34px; height: 18px; }
-  .switch input { opacity: 0; width: 0; height: 0; }
-  .switch .track {
-    position: absolute; inset: 0; background: var(--border); border-radius: 999px; transition: 0.15s;
-  }
-  .switch .track::before {
-    content: ""; position: absolute; width: 14px; height: 14px; left: 2px; top: 2px;
-    background: var(--text); border-radius: 50%; transition: 0.15s;
-  }
-  .switch input:checked + .track { background: var(--accent); }
-  .switch input:checked + .track::before { transform: translateX(16px); }
+/* — segmented control — */
+.seg { display: inline-flex; overflow: hidden; border: 1px solid var(--color-divider); border-radius: var(--radius-md); }
+.seg-opt { display: inline-flex; align-items: center; padding: 5px 11px; font-size: 13px; cursor: pointer; }
+.seg-opt + .seg-opt { border-left: 1px solid var(--color-divider); }
+.seg-opt.on { color: var(--color-accent); box-shadow: inset 0 0 0 1px var(--color-accent); }
+.seg-opt:not(.on):hover { background: color-mix(in srgb, var(--color-text) 7%, transparent); }
 
-  /* right: logs (word-by-word predictions) - collapsed by default */
-  #logs-panel {
-    width: 280px; flex-shrink: 0; background: var(--panel);
-    border-left: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0;
-    transition: width 0.15s ease;
-  }
-  #logs-panel.collapsed { width: auto; }
-  #logs-toggle {
-    all: unset; cursor: pointer; display: flex; align-items: center; justify-content: space-between;
-    font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted);
-    padding: 12px 14px; border-bottom: 1px solid var(--border); white-space: nowrap;
-  }
-  #logs-toggle:hover { color: var(--text); }
-  #logs-arrow { display: inline-block; transition: transform 0.15s ease; margin-left: 10px; }
-  #logs-panel.collapsed #logs-arrow { transform: rotate(-90deg); }
-  #logs-panel.collapsed #logs-toggle { border-bottom: none; }
-  #logs-list { flex: 1; overflow-y: auto; padding: 8px 14px; min-width: 0; }
-  .log-item { padding: 8px 0; border-bottom: 1px solid var(--border); }
-  .log-item:last-child { border-bottom: none; }
-  .log-item .word { font-size: 14px; font-weight: 600; }
-  .log-item .meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
-  #logs-empty { color: var(--muted); font-size: 12px; padding: 12px 0; }
+/* — tags — */
+.tag { display: inline-flex; align-items: center; font-size: 11px; letter-spacing: 0.02em; padding: 3px 10px; border-radius: 2px; }
+.tag-accent { background: transparent; border: 1px solid var(--color-accent-300); color: var(--color-accent); }
+.tag-outline { border: 1px solid var(--color-divider); color: var(--color-neutral-700); }
 
-  .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+/* — table — */
+.table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.table td { padding: var(--space-2) 0; border-bottom: 1px solid var(--color-divider); }
+.table td:first-child { padding-left: var(--space-4); }
+.table td:last-child { text-align: right; padding-right: var(--space-4); }
+
+/* — camera plate — */
+.plate { border-color: var(--color-neutral-200); border-radius: var(--radius-sm); overflow: hidden; position: relative; }
+
+/* ==========================================================================
+   Layout
+   ========================================================================== */
+.nav {
+  display: flex; align-items: center; gap: var(--space-4);
+  padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--color-divider);
+  flex-wrap: wrap; flex-shrink: 0;
+}
+.brand-block { display: flex; flex-direction: column; margin-right: auto; }
+.brand-title { font-family: var(--font-heading); font-weight: 600; font-size: 20px; line-height: 1.1; }
+.brand-kicker { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--color-accent-700); }
+.connect-group, .connected-group { display: flex; align-items: center; gap: var(--space-2); }
+.nav-divider { width: 1px; height: 26px; background: var(--color-divider); }
+.status-block { display: flex; align-items: center; gap: 8px; }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; background: transparent; border: 1px solid var(--color-neutral-500); }
+.status-dot.live { background: var(--color-accent); border: none; box-shadow: 0 0 0 3px var(--color-accent-200); }
+.status-label { font-family: var(--font-heading); font-weight: 600; font-size: 14px; color: var(--color-neutral-700); }
+.status-label.live { color: var(--color-text); }
+
+.app-grid {
+  flex: 1; min-height: 0; display: grid;
+  grid-template-columns: 248px minmax(0, 1fr) 296px;
+}
+
+/* — left rail — */
+.rail-left {
+  border-right: 1px solid var(--color-divider); padding: var(--space-4);
+  display: flex; flex-direction: column; gap: var(--space-3); overflow-y: auto;
+}
+.camera-plate { width: 100%; aspect-ratio: 4/3; background: var(--color-neutral-200); transition: opacity 0.15s ease; }
+.camera-plate video, .camera-plate canvas {
+  position: absolute; inset: 0; width: 100%; height: 100%; transform: scaleX(-1);
+}
+.camera-plate.off { opacity: 0.55; }
+.camera-off-label {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  font: 9.5px ui-monospace, Menlo, monospace; letter-spacing: 0.04em; color: var(--color-neutral-700);
+}
+.hands-row { display: flex; align-items: center; justify-content: space-between; font-size: 13px; }
+.hands-row .value { font-family: var(--font-heading); font-weight: 600; font-size: 16px; }
+.privacy-note { font-size: 12px; line-height: 1.6; text-align: justify; color: color-mix(in srgb, var(--color-text) 62%, transparent); }
+.speak-toggle-block { margin-top: auto; display: flex; flex-direction: column; gap: var(--space-2); }
+.speak-toggle-row { display: flex; align-items: center; justify-content: space-between; font-size: 12px; }
+.speak-toggle-hint { font-size: 11.5px; color: color-mix(in srgb, var(--color-text) 55%, transparent); line-height: 1.5; }
+
+/* — center stage — */
+.stage { display: flex; flex-direction: column; min-width: 0; }
+
+.empty-state {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: var(--space-8) var(--space-6); text-align: center;
+}
+.empty-kicker { font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--color-accent-700); }
+.empty-state h2 { font-family: var(--font-heading); font-weight: 400; font-size: 46px; margin: var(--space-3) 0 var(--space-2); letter-spacing: -0.02em; }
+.empty-state p { max-width: 520px; font-size: 14px; line-height: 1.7; color: color-mix(in srgb, var(--color-text) 65%, transparent); }
+.empty-actions { display: flex; align-items: center; gap: var(--space-4); margin-top: var(--space-6); }
+
+.transcript-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.transcript-header { display: flex; align-items: baseline; justify-content: space-between; padding: var(--space-4) var(--space-6) var(--space-2); }
+.transcript-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 0 var(--space-6); display: flex; flex-direction: column; justify-content: flex-end; gap: var(--space-4); }
+.transcript-empty { margin: auto 0; text-align: center; font-size: 13px; color: color-mix(in srgb, var(--color-text) 55%, transparent); }
+.past-row { display: flex; gap: var(--space-4); align-items: baseline; }
+.past-row .ts { font-size: 11px; width: 52px; flex: none; color: color-mix(in srgb, var(--color-text) 55%, transparent); }
+.past-row .sentence { margin: 0; font-family: var(--font-heading); font-size: 26px; line-height: 1.25; }
+
+.live-block {
+  border-top: 1px solid var(--color-divider); border-bottom: 1px solid var(--color-accent-300);
+  padding: var(--space-4) 0 var(--space-6); display: flex; gap: var(--space-4); align-items: baseline;
+}
+.live-block .ts { font-size: 11px; width: 52px; flex: none; color: var(--color-accent-700); }
+#caption {
+  margin: 0; font-family: var(--font-heading); font-size: 64px; line-height: 1.15;
+  letter-spacing: -0.02em; min-height: 1.15em; transition: font-size 0.15s ease;
+}
+#caption.placeholder { color: color-mix(in srgb, var(--color-text) 45%, transparent); font-weight: 400; font-size: 32px; }
+.word-active { color: var(--color-accent-700); border-bottom: 2px solid var(--color-accent-300); }
+.caret {
+  display: inline-block; width: 3px; height: 0.8em; background: var(--color-accent);
+  margin-left: 8px; vertical-align: -0.1em; animation: caret-blink 1s step-end infinite;
+}
+@keyframes caret-blink { 50% { opacity: 0; } }
+.composing-row { display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-3); }
+.composing-kicker { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-accent-700); }
+.meter { width: 120px; height: 3px; background: var(--color-neutral-300); position: relative; }
+.meter-fill { position: absolute; inset: 0 auto 0 0; width: 0%; background: var(--color-accent); transition: width 0.1s linear; }
+.composing-detail { font-size: 11.5px; color: color-mix(in srgb, var(--color-text) 55%, transparent); }
+
+.transcript-footer {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-4) var(--space-6); border-top: 1px solid var(--color-divider); flex-shrink: 0;
+}
+.translating-tag { display: none; align-items: center; }
+.translating-tag.show { display: inline-flex; }
+.translating-tag .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--color-accent); margin-right: 6px; }
+.footer-spacer { flex: 1; }
+.caption-size-label { font-size: 11.5px; color: color-mix(in srgb, var(--color-text) 50%, transparent); }
+
+/* — right rail — */
+.rail-right { border-left: 1px solid var(--color-divider); display: flex; flex-direction: column; min-height: 0; }
+.rail-right-section { padding: var(--space-4); }
+.rail-right-section.tight-bottom { padding-bottom: var(--space-2); }
+.model-rows { font-size: 12.5px; line-height: 1.9; color: color-mix(in srgb, var(--color-text) 70%, transparent); }
+.model-rows .row { display: flex; justify-content: space-between; gap: var(--space-3); }
+.model-rows .row span:last-child { color: var(--color-text); white-space: nowrap; }
+.model-placeholder { margin: 0; font-size: 12.5px; line-height: 1.7; color: color-mix(in srgb, var(--color-text) 55%, transparent); }
+.vocab-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: var(--space-3); }
+.logs-block { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: var(--space-3) var(--space-4) var(--space-3); overflow: hidden; }
+.logs-toggle-row { all: unset; cursor: pointer; display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-2); flex-shrink: 0; }
+.logs-toggle-row svg { width: 14px; height: 14px; color: var(--color-neutral-600); transition: transform 0.15s ease; }
+.logs-block.collapsed .logs-toggle-row svg { transform: rotate(-90deg); }
+#logs-list { overflow-y: auto; font-size: 12.5px; min-height: 0; }
+.log-row { padding: 7px 0; border-bottom: 1px solid var(--color-divider); display: flex; justify-content: space-between; gap: var(--space-3); }
+.log-row:last-child { border-bottom: none; }
+.log-row .word { font-family: var(--font-heading); font-weight: 600; }
+.log-row.is-sentence { opacity: 0.6; }
+#logs-empty { color: color-mix(in srgb, var(--color-text) 55%, transparent); font-size: 12px; }
+
+@media (max-width: 900px) {
+  .app-grid { grid-template-columns: 1fr; grid-auto-rows: auto; overflow-y: auto; }
+  .rail-left, .rail-right { border: none; border-bottom: 1px solid var(--color-divider); }
+}
 </style>
 </head>
 <body>
 
-<header>
-  <h1>SIGNBRIDGE · LIVE</h1>
-  <input id="ws-url" type="text" value="ws://localhost:8765" spellcheck="false" />
-  <button id="connect-btn" class="primary">Connect</button>
-  <button id="disconnect-btn" class="danger" disabled>Stop</button>
-  <button id="demo-btn">Demo (no server)</button>
-  <span style="width: 1px; height: 20px; background: var(--border); margin: 0 4px;"></span>
-  <button id="start-recording-btn" class="primary" disabled>● Start Recording</button>
-  <button id="stop-recording-btn" class="danger" disabled>Stop Recording</button>
-  <div class="spacer"></div>
-  <div class="status"><span id="status-dot" class="status-dot"></span><span id="status-text">Disconnected</span></div>
-</header>
+<div class="nav">
+  <div class="brand-block">
+    <span class="brand-title">SignBridge</span>
+    <span class="brand-kicker">Live captions · ASL → speech</span>
+  </div>
 
-<main>
-  <div id="camera-panel">
-    <div id="camera-wrap">
+  <div id="connect-group" class="connect-group">
+    <label class="muted-55" style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase">MEC bridge</label>
+    <input id="ws-url" class="input tnum" type="text" value="ws://localhost:8765" spellcheck="false" style="width:210px" />
+    <button id="connect-btn" class="btn btn-primary"><i data-lucide="plug"></i>Connect</button>
+    <button id="demo-btn" class="btn btn-ghost">Demo, no server</button>
+  </div>
+
+  <div id="connected-group" class="connected-group" hidden>
+    <button id="disconnect-btn" class="btn btn-secondary"><i data-lucide="unplug"></i>Disconnect</button>
+  </div>
+
+  <span class="nav-divider"></span>
+
+  <div class="status-block">
+    <span id="status-dot" class="status-dot"></span>
+    <span id="status-label" class="status-label">Not connected</span>
+    <span id="status-stats" class="tnum muted-55" style="font-size:12px" hidden></span>
+  </div>
+</div>
+
+<div class="app-grid">
+
+  <aside class="rail-left">
+    <h6>Capture</h6>
+    <div id="camera-plate" class="plate camera-plate off">
       <video id="camera-video" autoplay playsinline muted></video>
       <canvas id="camera-canvas"></canvas>
+      <div id="camera-off-label" class="camera-off-label">camera off</div>
     </div>
-    <div id="hands-badge">Hands detected: <b id="hands-count">0</b></div>
-    <div class="hint">
-      Camera + landmark preview is just a sanity check that MediaPipe sees
-      your hands — the caption is what matters. Nothing here leaves your
-      browser except the 42 landmark coordinates sent to the server.
+    <div class="hands-row">
+      <span class="muted-60">Hands detected</span>
+      <span id="hands-count" class="value tnum">—</span>
     </div>
-  </div>
+    <hr class="hr" style="margin:var(--space-1) 0" />
+    <p id="privacy-note" class="privacy-note">Connecting asks for camera permission and starts landmark detection in this browser. Nothing is captioned until you begin translating.</p>
 
-  <div id="stage">
-    <div id="caption-box">
-      <div id="caption" class="placeholder">Connect to start captioning…</div>
+    <div id="speak-toggle-block" class="speak-toggle-block" hidden>
+      <div class="speak-toggle-row">
+        <span class="muted-60">Speak each word</span>
+        <span class="seg">
+          <span id="seg-on" class="seg-opt on">On</span><span id="seg-off" class="seg-opt">Off</span>
+        </span>
+      </div>
+      <div class="speak-toggle-hint">Off batches the whole sentence and speaks it when you stop translating.</div>
     </div>
-    <div id="sub-caption"></div>
+  </aside>
 
-    <div id="stage-controls">
-      <label class="switch">
-        <input id="speak-each-word" type="checkbox" checked />
-        <span class="track"></span>
-      </label>
-      <span>Speak each word</span>
-      <label>Caption size
-        <input id="font-size" type="range" min="24" max="96" value="48" />
-      </label>
+  <section class="stage">
+    <div id="empty-state" class="empty-state">
+      <span class="empty-kicker">Step one</span>
+      <h2>Open the link to the MEC host</h2>
+      <p>The model runs on the edge server; this page only sends landmark coordinates and speaks what comes back. Once the handshake lands, press <em>Start translating</em> to begin a sentence.</p>
+      <div class="empty-actions">
+        <button id="start-recording-btn-empty" class="btn btn-secondary" disabled><i data-lucide="play"></i>Start translating</button>
+        <span class="tnum muted-60" style="font-size:11.5px">available once the handshake completes</span>
+      </div>
     </div>
-  </div>
 
-  <div id="logs-panel" class="collapsed">
-    <button id="logs-toggle" aria-expanded="false">
-      <span>Logs <span id="logs-count">(0)</span></span>
-      <span id="logs-arrow">▾</span>
-    </button>
-    <div id="logs-list" hidden><div id="logs-empty">Nothing committed yet.</div></div>
-  </div>
-</main>
+    <div id="transcript-view" class="transcript-view" hidden>
+      <div class="transcript-header">
+        <h6>Transcript</h6>
+        <span id="transcript-meta" class="tnum muted-60" style="font-size:11px">0 sentences · session 00:00</span>
+      </div>
+      <div id="transcript-scroll" class="transcript-scroll">
+        <div id="transcript-empty" class="transcript-empty">Press <strong>Start translating</strong> to begin a sentence.</div>
+        <div id="live-block" class="live-block" hidden>
+          <span id="live-timestamp" class="ts tnum"></span>
+          <div style="min-width:0">
+            <p id="caption" class="placeholder">Listening…</p>
+            <div id="composing-row" class="composing-row" hidden>
+              <span class="composing-kicker">Composing</span>
+              <span class="meter"><span id="meter-fill" class="meter-fill"></span></span>
+              <span id="composing-detail" class="composing-detail tnum">—</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="transcript-footer">
+        <button id="start-recording-btn" class="btn btn-primary"><i data-lucide="play"></i>Start translating</button>
+        <button id="stop-recording-btn" class="btn btn-secondary accent-outline" hidden><i data-lucide="square"></i>Stop translating</button>
+        <span id="translating-tag" class="tag tag-accent translating-tag"><span class="dot"></span>Translating</span>
+        <div class="footer-spacer"></div>
+        <span class="caption-size-label tnum">Caption size</span>
+        <input id="font-size" type="range" min="24" max="96" value="64" style="width:110px;accent-color:var(--color-accent)" />
+        <button id="copy-btn" class="btn btn-ghost"><i data-lucide="copy"></i>Copy</button>
+      </div>
+    </div>
+  </section>
+
+  <aside class="rail-right">
+    <div class="rail-right-section tight-bottom">
+      <h6>Link telemetry</h6>
+    </div>
+    <table class="table tnum">
+      <tbody>
+        <tr><td class="muted-60">Round trip</td><td id="tel-rtt">—</td></tr>
+        <tr><td class="muted-60">Frames sent</td><td id="tel-fps">—</td></tr>
+        <tr><td class="muted-60">Uplink</td><td id="tel-uplink">—</td></tr>
+        <tr><td class="muted-60">Predictions</td><td id="tel-predictions">—</td></tr>
+      </tbody>
+    </table>
+
+    <div class="rail-right-section">
+      <h6 style="margin-bottom:var(--space-2)">Model · from welcome</h6>
+      <div id="model-panel">
+        <p class="model-placeholder">The server reports its architecture, window, feature dimension and label vocabulary in the handshake. Nothing to show yet.</p>
+      </div>
+    </div>
+
+    <hr class="hr" style="margin:0" />
+
+    <div id="logs-block" class="logs-block collapsed">
+      <button id="logs-toggle" class="logs-toggle-row" aria-expanded="false">
+        <h6>Logs <span id="logs-count" class="tnum">(0)</span></h6>
+        <i data-lucide="chevron-right"></i>
+      </button>
+      <div id="logs-list" hidden><div id="logs-empty">Nothing committed yet.</div></div>
+    </div>
+  </aside>
+
+</div>
 
 <script type="module">
 // ============================================================================
@@ -201,9 +369,13 @@
 // capture host talks to over raw TCP, just reachable from a browser. The
 // server does its own vote-smoothing (server.vote_window in config.yaml);
 // this page adds a *second*, independent debounce layer on the raw
-// per-tick prediction, per the spec below, since a browser client and a
-// from-Python client have different noise/latency characteristics worth
-// insulating against separately.
+// per-tick prediction, since a browser client and a from-Python client have
+// different noise/latency characteristics worth insulating against
+// separately.
+//
+// Visual design follows design_handoff_signbridge_captions/README.md
+// (screens 1a connected + 1b pre-connect); the protocol and commit logic
+// below are unchanged from the plain version this was restyled from.
 // ============================================================================
 
 import { HandLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
@@ -223,39 +395,80 @@ const COMMIT_CONFIDENCE = 0.75; // ...above this confidence, before a word commi
 // ---------------------------------------------------------------------------
 const el = (id) => document.getElementById(id);
 const wsUrlInput = el("ws-url");
+const connectGroup = el("connect-group");
+const connectedGroup = el("connected-group");
 const connectBtn = el("connect-btn");
 const disconnectBtn = el("disconnect-btn");
 const demoBtn = el("demo-btn");
 const startRecordingBtn = el("start-recording-btn");
 const stopRecordingBtn = el("stop-recording-btn");
+const startRecordingBtnEmpty = el("start-recording-btn-empty");
+const translatingTag = el("translating-tag");
 const statusDot = el("status-dot");
-const statusText = el("status-text");
+const statusLabel = el("status-label");
+const statusStats = el("status-stats");
+const emptyState = el("empty-state");
+const transcriptView = el("transcript-view");
+const transcriptScroll = el("transcript-scroll");
+const transcriptEmpty = el("transcript-empty");
+const transcriptMeta = el("transcript-meta");
+const liveBlock = el("live-block");
+const liveTimestamp = el("live-timestamp");
 const captionEl = el("caption");
-const captionBoxEl = el("caption-box");
-const subCaptionEl = el("sub-caption");
-const logsPanel = el("logs-panel");
+const composingRow = el("composing-row");
+const meterFill = el("meter-fill");
+const composingDetail = el("composing-detail");
+const logsBlock = el("logs-block");
 const logsToggle = el("logs-toggle");
 const logsList = el("logs-list");
 const logsEmpty = el("logs-empty");
 const logsCount = el("logs-count");
-const speakEachWordToggle = el("speak-each-word");
+const segOn = el("seg-on");
+const segOff = el("seg-off");
 const fontSizeSlider = el("font-size");
+const copyBtn = el("copy-btn");
 const video = el("camera-video");
 const canvas = el("camera-canvas");
 const canvasCtx = canvas.getContext("2d");
+const cameraPlate = el("camera-plate");
+const cameraOffLabel = el("camera-off-label");
 const handsCountEl = el("hands-count");
-let logEntryCount = 0;
+const privacyNote = el("privacy-note");
+const speakToggleBlock = el("speak-toggle-block");
+const telRtt = el("tel-rtt");
+const telFps = el("tel-fps");
+const telUplink = el("tel-uplink");
+const telPredictions = el("tel-predictions");
+const modelPanel = el("model-panel");
 
-logsToggle.addEventListener("click", () => {
-  const collapsed = logsPanel.classList.toggle("collapsed");
-  logsList.hidden = collapsed;
-  logsToggle.setAttribute("aria-expanded", String(!collapsed));
-});
+const PRIVACY_IDLE = "Connecting asks for camera permission and starts landmark detection in this browser. Nothing is captioned until you begin translating.";
+const PRIVACY_LIVE = "The preview is only a sanity check that MediaPipe sees your hands. No video leaves this browser — only the 42 landmark coordinates travel to the MEC host.";
+
+let speakEachWord = true;
+function setSpeakEachWord(value) {
+  speakEachWord = value;
+  segOn.classList.toggle("on", value);
+  segOff.classList.toggle("on", !value);
+}
+segOn.addEventListener("click", () => setSpeakEachWord(true));
+segOff.addEventListener("click", () => setSpeakEachWord(false));
 
 fontSizeSlider.addEventListener("input", () => {
   captionEl.style.fontSize = fontSizeSlider.value + "px";
 });
-captionEl.style.fontSize = fontSizeSlider.value + "px";
+
+logsToggle.addEventListener("click", () => {
+  const collapsed = logsBlock.classList.toggle("collapsed");
+  logsList.hidden = collapsed;
+  logsToggle.setAttribute("aria-expanded", String(!collapsed));
+});
+
+copyBtn.addEventListener("click", () => {
+  const text = sentenceWords.length ? sentenceWords.join(" ") : (sentences.at(-1)?.text || "");
+  if (text && navigator.clipboard) navigator.clipboard.writeText(text).catch(() => {});
+});
+
+if (window.lucide) window.lucide.createIcons();
 
 // ---------------------------------------------------------------------------
 // State
@@ -272,6 +485,15 @@ let lastCommitted = null;   // last word actually committed, so a held sign does
 let sentenceWords = [];     // words appended so far in the current recording
 let recording = false;      // gated by Start/Stop Recording, independent of the connection itself
 
+// New state, for the redesigned UI (see design handoff "State Management")
+let sentences = [];          // finished sentences: {text, startedAt, endedAt}
+let welcomeInfo = null;      // the welcome payload, persisted for the model panel
+let sessionStartedAt = null; // for the "session mm:ss" readout
+let sessionTimerId = null;
+let liveSentenceStartedAt = null;
+const stats = { predictions: 0, frameBytesThisSecond: 0, framesThisSecond: 0, lastRttMs: null, lastFrameSentAt: null };
+let statsTimerId = null;
+
 // ---------------------------------------------------------------------------
 // Connection lifecycle
 // ---------------------------------------------------------------------------
@@ -279,7 +501,11 @@ connectBtn.addEventListener("click", () => connect().catch(onFatalError));
 disconnectBtn.addEventListener("click", () => disconnect());
 demoBtn.addEventListener("click", () => (running ? stopDemo() : startDemo()));
 startRecordingBtn.addEventListener("click", () => startRecording());
+startRecordingBtnEmpty.addEventListener("click", () => startRecording());
 stopRecordingBtn.addEventListener("click", () => stopRecording());
+
+wsUrlInput.addEventListener("focus", () => wsUrlInput.classList.add("focused"));
+wsUrlInput.addEventListener("blur", () => wsUrlInput.classList.remove("focused"));
 
 async function connect() {
   if (running) return;
@@ -301,15 +527,12 @@ async function connect() {
       return;
     }
     if (message.type === "welcome") {
-      setStatus("live");
-      running = true;
-      connectBtn.disabled = true;
-      disconnectBtn.disabled = false;
-      startRecordingBtn.disabled = false;
-      captionEl.classList.remove("placeholder");
-      captionEl.textContent = "Connected. Press Start Recording to begin a sentence.";
-      detectLoop();
+      onConnected(message);
+      detectLoop(); // only the real path has a camera + hand-landmarker to drive; demo mode doesn't call this
     } else if (message.type === "prediction") {
+      const now = performance.now();
+      if (stats.lastFrameSentAt !== null) stats.lastRttMs = now - stats.lastFrameSentAt;
+      stats.predictions += 1;
       // The server's own vote-smoothed label is message.label; this UI
       // debounces on the raw per-tick guess itself (message.raw_label),
       // so its commit logic is independent of - not stacked on top of -
@@ -325,11 +548,36 @@ async function connect() {
   };
 }
 
+function onConnected(welcome) {
+  welcomeInfo = welcome;
+  running = true;
+  sessionStartedAt = performance.now();
+
+  setStatus("live");
+  connectGroup.hidden = true;
+  connectedGroup.hidden = false;
+  emptyState.hidden = true;
+  transcriptView.hidden = false;
+  speakToggleBlock.hidden = false;
+  startRecordingBtnEmpty.disabled = true;
+  privacyNote.textContent = PRIVACY_LIVE;
+  cameraPlate.classList.remove("off");
+  cameraOffLabel.hidden = true;
+
+  renderModelPanel();
+  renderTranscript();
+  updateTranscriptMeta();
+  sessionTimerId = setInterval(updateTranscriptMeta, 1000);
+  statsTimerId = setInterval(updateTelemetry, 1000);
+}
+
 function disconnect() {
   running = false;
   if (recording) stopRecording();
   if (rafId !== null) cancelAnimationFrame(rafId);
   rafId = null;
+  if (sessionTimerId) clearInterval(sessionTimerId);
+  if (statsTimerId) clearInterval(statsTimerId);
   if (ws) {
     try { ws.send(JSON.stringify({ type: "reset" })); } catch {}
     ws.close();
@@ -337,57 +585,155 @@ function disconnect() {
   ws = null;
   stopCamera();
   stopDemo();
-  connectBtn.disabled = false;
-  disconnectBtn.disabled = true;
-  startRecordingBtn.disabled = true;
-  stopRecordingBtn.disabled = true;
+
+  connectGroup.hidden = false;
+  connectedGroup.hidden = true;
+  emptyState.hidden = false;
+  transcriptView.hidden = true;
+  speakToggleBlock.hidden = true;
+  startRecordingBtnEmpty.disabled = true;
+  cameraPlate.classList.add("off");
+  cameraOffLabel.hidden = false;
+  privacyNote.textContent = PRIVACY_IDLE;
+  handsCountEl.textContent = "—";
   setStatus("disconnected");
-  captionEl.classList.add("placeholder");
-  captionEl.textContent = "Connect to start captioning…";
-  subCaptionEl.textContent = "";
+
   commitBuffer = [];
   lastCommitted = null;
   sentenceWords = [];
+  sentences = [];
+  welcomeInfo = null;
+  modelPanel.innerHTML = '<p class="model-placeholder">The server reports its architecture, window, feature dimension and label vocabulary in the handshake. Nothing to show yet.</p>';
+  telRtt.textContent = telFps.textContent = telUplink.textContent = telPredictions.textContent = "—";
+  stats.predictions = 0;
 }
 
 /** Begin composing a new sentence: gestures start appending to the caption in real time. */
 function startRecording() {
-  if (recording) return;
+  if (recording || !running) return;
   recording = true;
   sentenceWords = [];
   commitBuffer = [];
   lastCommitted = null;
-  startRecordingBtn.disabled = true;
-  stopRecordingBtn.disabled = false;
-  captionEl.classList.remove("placeholder");
-  captionEl.textContent = "";
-  captionBoxEl.scrollTop = 0;
-  subCaptionEl.textContent = "Recording…";
+  liveSentenceStartedAt = new Date();
+
+  startRecordingBtn.hidden = true;
+  stopRecordingBtn.hidden = false;
+  translatingTag.classList.add("show");
+  liveBlock.hidden = false;
+  transcriptEmpty.hidden = true;
+  liveTimestamp.textContent = formatClock(liveSentenceStartedAt);
+  captionEl.classList.add("placeholder");
+  captionEl.textContent = "Listening…";
+  composingRow.hidden = false;
+  updateComposingMeter(null, 0, 0);
+  scrollTranscriptToEnd();
 }
 
 /** End the current sentence. In sentence-batched mode this is what actually speaks it. */
 function stopRecording() {
   if (!recording) return;
   recording = false;
-  startRecordingBtn.disabled = !running;
-  stopRecordingBtn.disabled = true;
-  subCaptionEl.textContent = "";
+  startRecordingBtn.hidden = false;
+  stopRecordingBtn.hidden = true;
+  translatingTag.classList.remove("show");
+  composingRow.hidden = true;
 
   if (sentenceWords.length) {
-    if (!speakEachWordToggle.checked) speak(sentenceWords.join(" "));
-    addLogEntry(`“${sentenceWords.join(" ")}”`, null, true);
+    const text = sentenceWords.join(" ");
+    if (!speakEachWord) speak(text);
+    addLogEntry(`“${text}”`, null, true);
+    sentences.push({ text, startedAt: liveSentenceStartedAt, endedAt: new Date() });
+    renderTranscript();
   }
+  liveBlock.hidden = true;
+  if (!sentences.length) transcriptEmpty.hidden = false;
+  updateTranscriptMeta();
 }
 
 function onFatalError(err) {
   console.error(err);
-  subCaptionEl.textContent = String(err.message || err);
   disconnect();
 }
 
 function setStatus(state) {
   statusDot.classList.toggle("live", state === "live");
-  statusText.textContent = { connecting: "Connecting…", live: "Live", disconnected: "Disconnected" }[state] || state;
+  statusLabel.classList.toggle("live", state === "live");
+  statusLabel.textContent = { connecting: "Connecting…", live: "Live", disconnected: "Not connected" }[state] || state;
+  statusStats.hidden = state !== "live";
+}
+
+// ---------------------------------------------------------------------------
+// Transcript, telemetry and model-panel rendering (new in this redesign)
+// ---------------------------------------------------------------------------
+function formatClock(date) {
+  return date.toTimeString().slice(0, 8);
+}
+
+function renderTranscript() {
+  transcriptScroll.querySelectorAll(".past-row").forEach((node) => node.remove());
+  const opacities = [0.5, 0.62, 0.78];
+  const recent = sentences.slice(-3);
+  for (let i = 0; i < recent.length; i++) {
+    const row = document.createElement("div");
+    row.className = "past-row";
+    row.style.opacity = opacities[opacities.length - recent.length + i];
+    row.innerHTML = `<span class="ts tnum">${escapeHtml(formatClock(recent[i].startedAt))}</span><p class="sentence">${escapeHtml(recent[i].text)}</p>`;
+    transcriptScroll.insertBefore(row, liveBlock);
+  }
+  scrollTranscriptToEnd();
+}
+
+function updateTranscriptMeta() {
+  const elapsed = sessionStartedAt !== null ? (performance.now() - sessionStartedAt) / 1000 : 0;
+  const mm = String(Math.floor(elapsed / 60)).padStart(2, "0");
+  const ss = String(Math.floor(elapsed % 60)).padStart(2, "0");
+  const noun = sentences.length === 1 ? "sentence" : "sentences";
+  transcriptMeta.textContent = `${sentences.length} ${noun} · session ${mm}:${ss}`;
+}
+
+function scrollTranscriptToEnd() {
+  transcriptScroll.scrollTop = transcriptScroll.scrollHeight;
+}
+
+function updateComposingMeter(label, confidence, agree) {
+  const pct = Math.min(100, (agree / COMMIT_AGREE) * 100);
+  meterFill.style.width = pct + "%";
+  composingDetail.textContent = label
+    ? `${label} · ${Math.round(confidence * 100)}% · ${agree} of ${COMMIT_WINDOW} agree`
+    : `— · 0 of ${COMMIT_WINDOW} agree`;
+}
+
+function renderModelPanel() {
+  if (!welcomeInfo) return;
+  const rows = [
+    ["architecture", welcomeInfo.architecture || (welcomeInfo.untrained ? "untrained" : "—")],
+    ["window", welcomeInfo.window ? `${welcomeInfo.window} frames` : "—"],
+    ["feature dim", welcomeInfo.feature_dim ?? "—"],
+    ["device", welcomeInfo.device || "—"],
+  ];
+  const rowsHtml = rows.map(([label, value]) => `<div class="row"><span>${label}</span><span>${escapeHtml(String(value))}</span></div>`).join("");
+  const chips = (welcomeInfo.labels || []).map((label) => `<span class="tag tag-outline">${escapeHtml(label)}</span>`).join("");
+  const warning = welcomeInfo.untrained
+    ? `<p class="model-placeholder" style="color:var(--color-accent-700);margin-bottom:var(--space-2)">Untrained model — predictions are meaningless; speech is disabled.</p>`
+    : "";
+  modelPanel.innerHTML = `${warning}<div class="model-rows">${rowsHtml}</div><div class="vocab-chips">${chips}</div>`;
+}
+
+function updateTelemetry() {
+  telFps.textContent = `${stats.framesThisSecond} /s`;
+  telUplink.textContent = `${(stats.frameBytesThisSecond / 1024).toFixed(1)} kB/s`;
+  telPredictions.textContent = stats.predictions.toLocaleString();
+  telRtt.textContent = stats.lastRttMs !== null ? `${stats.lastRttMs.toFixed(1)} ms` : "—";
+  statusStats.textContent = `${stats.lastRttMs !== null ? stats.lastRttMs.toFixed(1) : "—"} ms · ${stats.framesThisSecond} fps`;
+  stats.framesThisSecond = 0;
+  stats.frameBytesThisSecond = 0;
+}
+
+function escapeHtml(text) {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
 }
 
 // ---------------------------------------------------------------------------
@@ -432,7 +778,11 @@ function detectLoop() {
   handsCountEl.textContent = String(handsDetected);
 
   if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type: "frame", landmarks, mask }));
+    const payload = JSON.stringify({ type: "frame", landmarks, mask });
+    ws.send(payload);
+    stats.framesThisSecond += 1;
+    stats.frameBytesThisSecond += payload.length;
+    stats.lastFrameSentAt = now;
   }
   rafId = requestAnimationFrame(detectLoop);
 }
@@ -471,7 +821,7 @@ function drawPreview(result) {
     [0, 17],
   ];
   for (const points of result.landmarks || []) {
-    canvasCtx.strokeStyle = "#4da3ff";
+    canvasCtx.strokeStyle = "#e1ad66";
     canvasCtx.lineWidth = 2;
     for (const [a, b] of connections) {
       canvasCtx.beginPath();
@@ -479,7 +829,7 @@ function drawPreview(result) {
       canvasCtx.lineTo(points[b].x * canvas.width, points[b].y * canvas.height);
       canvasCtx.stroke();
     }
-    canvasCtx.fillStyle = "#eef1f5";
+    canvasCtx.fillStyle = "#ece9e4";
     for (const p of points) {
       canvasCtx.beginPath();
       canvasCtx.arc(p.x * canvas.width, p.y * canvas.height, 2.5, 0, Math.PI * 2);
@@ -507,6 +857,19 @@ function handlePrediction(label, confidence) {
     if (entry.confidence < COMMIT_CONFIDENCE) continue;
     counts.set(entry.label, (counts.get(entry.label) || 0) + 1);
   }
+
+  // Leading (not-yet-committed) candidate, for the Composing meter.
+  if (recording) {
+    let leader = null;
+    for (const [candidate, count] of counts) {
+      if (!leader || count > leader.count) leader = { candidate, count };
+    }
+    if (leader) {
+      const leaderConfidence = commitBuffer.filter((e) => e.label === leader.candidate).at(-1)?.confidence || 0;
+      updateComposingMeter(leader.candidate, leaderConfidence, leader.count);
+    }
+  }
+
   for (const [candidate, count] of counts) {
     if (count >= COMMIT_AGREE && candidate !== lastCommitted) {
       commitWord(candidate, confidence);
@@ -522,59 +885,64 @@ function commitWord(label, confidence) {
   if (!recording) return;
 
   sentenceWords.push(label);
-  captionEl.textContent = sentenceWords.join(" ");
-  captionBoxEl.scrollTop = captionBoxEl.scrollHeight; // keep the newest word in view
-  if (speakEachWordToggle.checked) speak(label);
+  captionEl.classList.remove("placeholder");
+  captionEl.innerHTML = sentenceWords
+    .map((w, i) => (i === sentenceWords.length - 1 ? `<span class="word-active">${escapeHtml(w)}</span><span class="caret"></span>` : escapeHtml(w)))
+    .join(" ");
+  scrollTranscriptToEnd();
+  if (speakEachWord) speak(label);
 }
 
 function addLogEntry(text, confidence, isSentence = false) {
   logsEmpty.remove();
-  const item = document.createElement("div");
-  item.className = "log-item";
+  const row = document.createElement("div");
+  row.className = "log-row" + (isSentence ? " is-sentence" : "");
   const time = new Date().toLocaleTimeString();
   const meta = isSentence ? `${time} · sentence` : `${time} · ${(confidence * 100).toFixed(0)}%`;
-  item.innerHTML = `<div class="word">${escapeHtml(text)}</div><div class="meta">${meta}</div>`;
-  logsList.prepend(item);
-  logEntryCount += 1;
-  logsCount.textContent = `(${logEntryCount})`;
-}
-
-function escapeHtml(text) {
-  const div = document.createElement("div");
-  div.textContent = text;
-  return div.innerHTML;
+  row.innerHTML = `<span class="word">${escapeHtml(text)}</span><span class="tnum muted-60" style="white-space:nowrap">${meta}</span>`;
+  logsList.prepend(row);
+  const count = logsList.querySelectorAll(".log-row").length;
+  logsCount.textContent = `(${count})`;
 }
 
 // ---------------------------------------------------------------------------
 // Speech (Web Speech API, entirely client-side - no round trip through the
 // MEC for audio, works even on a degraded link, matches the landmarks-only
-// privacy stance the rest of the project already takes)
+// privacy stance the rest of the project already takes). Never speaks an
+// untrained model's output, same safety gate signbridge.cli.run_host applies.
 // ---------------------------------------------------------------------------
 function speak(text) {
   if (!("speechSynthesis" in window) || !text) return;
+  if (welcomeInfo && welcomeInfo.untrained) return;
   const utterance = new SpeechSynthesisUtterance(text);
   window.speechSynthesis.speak(utterance);
 }
 
 // ---------------------------------------------------------------------------
 // Demo mode: exercises the exact same handlePrediction() path with fake
-// data, so the UI (debounce, captions, speech, logs) can be checked
-// without a camera or a running server.
+// data, so the UI (debounce, captions, speech, logs, transcript, telemetry)
+// can be checked without a camera or a running server.
 // ---------------------------------------------------------------------------
 function startDemo() {
   if (running) return;
-  running = true;
   demoBtn.textContent = "Stop demo";
-  connectBtn.disabled = true;
-  startRecordingBtn.disabled = false;
-  setStatus("live");
-  captionEl.classList.remove("placeholder");
-  captionEl.textContent = "Connected (demo). Press Start Recording to begin a sentence.";
+  onConnected({
+    labels: ["hello", "no", "yes", "thankyou", "i", "you", "water"],
+    window: 45,
+    feature_dim: 136,
+    architecture: "gru",
+    device: "cpu (demo)",
+    untrained: false,
+  });
 
-  const words = ["hello", "yes", "no", "thankyou", "idle"];
+  const words = ["hello", "yes", "no", "thankyou", "water", "idle"];
   demoTimer = setInterval(() => {
     const label = words[Math.floor(Math.random() * words.length)];
     const confidence = 0.7 + Math.random() * 0.3;
+    stats.predictions += 1;
+    stats.lastRttMs = 3 + Math.random() * 8;
+    stats.framesThisSecond += 2;
+    stats.frameBytesThisSecond += 900;
     handlePrediction(label, confidence);
   }, 150); // ~ the 15fps-ish tick rate a live classifier would produce
 }
@@ -582,20 +950,8 @@ function startDemo() {
 function stopDemo() {
   if (demoTimer) clearInterval(demoTimer);
   demoTimer = null;
-  demoBtn.textContent = "Demo (no server)";
-  if (!ws) {
-    if (recording) stopRecording();
-    running = false;
-    connectBtn.disabled = false;
-    startRecordingBtn.disabled = true;
-    stopRecordingBtn.disabled = true;
-    setStatus("disconnected");
-    captionEl.classList.add("placeholder");
-    captionEl.textContent = "Connect to start captioning…";
-    commitBuffer = [];
-    lastCommitted = null;
-    sentenceWords = [];
-  }
+  demoBtn.textContent = "Demo, no server";
+  if (!ws && running) disconnect();
 }
 </script>
 </body>
