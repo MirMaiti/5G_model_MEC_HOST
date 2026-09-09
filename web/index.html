@@ -123,6 +123,13 @@ p { margin: 0; }
 .status-label { font-family: var(--font-heading); font-weight: 600; font-size: 14px; color: var(--color-neutral-700); }
 .status-label.live { color: var(--color-text); }
 
+.connect-error {
+  padding: var(--space-2) var(--space-4); font-size: 13px; flex-shrink: 0;
+  background: color-mix(in srgb, #d9534f 16%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, #d9534f 40%, transparent);
+  color: #f3b4b1;
+}
+
 .app-grid {
   flex: 1; min-height: 0; display: grid;
   grid-template-columns: 248px minmax(0, 1fr) 296px;
@@ -254,6 +261,8 @@ p { margin: 0; }
     <span id="status-stats" class="tnum muted-55" style="font-size:12px" hidden></span>
   </div>
 </div>
+
+<div id="connect-error" class="connect-error" hidden></div>
 
 <div class="app-grid">
 
@@ -407,6 +416,15 @@ const translatingTag = el("translating-tag");
 const statusDot = el("status-dot");
 const statusLabel = el("status-label");
 const statusStats = el("status-stats");
+const connectError = el("connect-error");
+
+function showConnectError(message) {
+  connectError.textContent = message;
+  connectError.hidden = false;
+}
+function clearConnectError() {
+  connectError.hidden = true;
+}
 const emptyState = el("empty-state");
 const transcriptView = el("transcript-view");
 const transcriptScroll = el("transcript-scroll");
@@ -509,13 +527,42 @@ wsUrlInput.addEventListener("blur", () => wsUrlInput.classList.remove("focused")
 
 async function connect() {
   if (running) return;
+  clearConnectError();
   setStatus("connecting");
 
-  await startCamera();
-  await loadHandLandmarker();
+  try {
+    await startCamera();
+  } catch (err) {
+    onFatalError(new Error(`Could not access the camera: ${err.message || err}. Check the browser's camera permission for this page.`));
+    return;
+  }
+  try {
+    await loadHandLandmarker();
+  } catch (err) {
+    onFatalError(new Error(`Could not load the hand-landmark model: ${err.message || err}. Check your internet connection (it loads from a CDN).`));
+    return;
+  }
 
   const url = wsUrlInput.value.trim();
-  ws = new WebSocket(url);
+  let ws_;
+  try {
+    ws_ = new WebSocket(url);
+  } catch (err) {
+    onFatalError(new Error(`"${url}" isn't a valid WebSocket address.`));
+    return;
+  }
+  ws = ws_;
+  // If the handshake doesn't complete quickly, the server is almost
+  // certainly unreachable - wrong address, serve_ws.py not running, or a
+  // firewall/WSL networking issue - rather than a slow network.
+  const connectTimeout = setTimeout(() => {
+    if (ws === ws_ && !running) {
+      onFatalError(new Error(
+        `Timed out connecting to ${url}. Is "python -m signbridge.cli.serve_ws" running there, and is this address reachable ` +
+        `from this browser (try localhost if the bridge is on this same machine, or the MEC's real IP otherwise)?`
+      ));
+    }
+  }, 5000);
   ws.onopen = () => {
     ws.send(JSON.stringify({ type: "hello", layout: "hands" }));
   };
@@ -527,6 +574,8 @@ async function connect() {
       return;
     }
     if (message.type === "welcome") {
+      clearTimeout(connectTimeout);
+      clearConnectError();
       onConnected(message);
       detectLoop(); // only the real path has a camera + hand-landmarker to drive; demo mode doesn't call this
     } else if (message.type === "prediction") {
@@ -539,11 +588,18 @@ async function connect() {
       // whatever smoothing the server config applies.
       handlePrediction(message.raw_label || "", message.confidence || 0);
     } else if (message.type === "error") {
-      console.error("Server error:", message.error);
+      onFatalError(new Error(`Server rejected the connection: ${message.error}`));
     }
   };
-  ws.onerror = () => onFatalError(new Error("WebSocket connection failed."));
+  ws.onerror = () => {
+    clearTimeout(connectTimeout);
+    onFatalError(new Error(
+      `Could not open a WebSocket to ${url}. Most likely causes: serve_ws.py isn't running there, the address/port is ` +
+      `wrong, or a firewall (or WSL networking) is blocking the connection.`
+    ));
+  };
   ws.onclose = () => {
+    clearTimeout(connectTimeout);
     if (running) disconnect();
   };
 }
@@ -653,6 +709,7 @@ function stopRecording() {
 
 function onFatalError(err) {
   console.error(err);
+  showConnectError(err.message || String(err));
   disconnect();
 }
 
@@ -925,6 +982,7 @@ function speak(text) {
 // ---------------------------------------------------------------------------
 function startDemo() {
   if (running) return;
+  clearConnectError();
   demoBtn.textContent = "Stop demo";
   onConnected({
     labels: ["hello", "no", "yes", "thankyou", "i", "you", "water"],
