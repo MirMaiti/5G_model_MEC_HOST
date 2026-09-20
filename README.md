@@ -73,8 +73,7 @@ python3.11 -m venv .venv && source .venv/bin/activate && pip install -r requirem
 pip install -r requirements-dev.txt
 ```
 
-The host needs Google's MediaPipe landmarker bundle. MediaPipe 1.0 removed the
-old `mp.solutions` API, so this is required, not optional:
+The host needs Google's MediaPipe landmarker bundle:
 
 ```bash
 python -m signbridge.cli.fetch_models
