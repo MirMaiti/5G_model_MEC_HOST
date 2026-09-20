@@ -445,16 +445,19 @@ the confusion matrix in `models/metrics.json`.
 
 ## Credits
 
+**Built for**
+- Developed for/during the 5G Innovation Hackathon 2026.
+
 **Contributors**
-- Pranav Vishal Deshkmukh
+- Pranav Vishal Deshmukh
 - Arjav Sethi
 - Vishal Shashidhar
 - Abhay Sharan
 - Asif Hosque
-  
+
 **Acknowledgments**
 - I would like to thank Prof. Salil Kashyap for giving the resources for the development of this project.
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+This project is licensed under the [GNU GPL v2](LICENSE).
