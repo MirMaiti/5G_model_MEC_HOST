@@ -45,9 +45,8 @@ buys three things:
 7. [The wire protocol](#7-the-wire-protocol)
 8. [Configuration](#8-configuration)
 9. [Project layout](#9-project-layout)
-10. [Extending it](#10-extending-it)
-11. [Tests](#11-tests)
-12. [Troubleshooting](#12-troubleshooting)
+10. [Tests](#11-tests)
+11. [Troubleshooting](#12-troubleshooting)
 
 ---
 
@@ -400,44 +399,7 @@ web/
 
 ---
 
-## 10. Extending it
-
-Each seam is a registry or an interface, so adding to one touches nothing else.
-
-**A new architecture** — write it and decorate it; the name is then valid in
-`config.yaml`:
-
-```python
-from signbridge.model.registry import register_architecture
-from signbridge.model.architectures import SequenceClassifier
-
-@register_architecture("tcn")
-class TemporalConvNet(SequenceClassifier):
-    def forward(self, x):        # (B, T, D) -> (B, C)
-        ...
-```
-
-**A new speech backend** — subclass `TTSBackend` and register it:
-
-```python
-from signbridge.host.tts import TTSBackend, register_backend
-
-@register_backend("cloud")
-class CloudVoice(TTSBackend):
-    def say(self, text: str) -> None:
-        ...
-```
-
-**A new landmark source** — subclass `LandmarkSource` and yield `LandmarkFrame`s.
-The client loop takes any source, so a video file, a second camera or a network
-feed all work without touching the transport.
-
-**A different inference backend** — implement `Predictor` (ONNX Runtime, a
-quantised build, a remote accelerator). The TCP server only calls `.predict()`.
-
----
-
-## 11. Tests
+## 10. Tests
 
 ```bash
 python -m pytest tests/ -q
@@ -454,7 +416,7 @@ PyTorch.
 
 ---
 
-## 12. Troubleshooting
+## 11. Troubleshooting
 
 **"Could not open camera 0"** — on macOS, camera permission belongs to the app
 hosting your shell. An embedded terminal panel usually cannot get it; run from
