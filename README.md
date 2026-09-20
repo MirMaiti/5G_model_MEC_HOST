@@ -440,3 +440,21 @@ the confusion matrix in `models/metrics.json`.
 
 **Predictions lag behind the signing** — lower `server.inference_interval` and
 `server.vote_window`. Both trade responsiveness against stability.
+
+---
+
+## Credits
+
+**Contributors**
+- Pranav Vishal Deshkmukh
+- Arjav Sethi
+- Vishal Shashidhar
+- Abhay Sharan
+- Asif Hosque
+  
+**Acknowledgments**
+- I would like to thank Prof. Salil Kashyap for giving the resources for the development of this project.
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
