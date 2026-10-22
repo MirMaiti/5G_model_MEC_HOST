@@ -25,7 +25,7 @@ from typing import List, Optional
 import numpy as np
 
 from ..capture.base import LandmarkFrame
-from ..capture.mediapipe_source import CameraError, MediaPipeSource, draw_landmarks
+from ..capture.mediapipe_source import CameraError, MediaPipeSource, draw_landmarks, resolve_camera
 from ..config import load_config
 from ..landmarks import get_layout
 
@@ -60,7 +60,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--samples", type=int, default=30, help="Clips to record (default: 30)")
     parser.add_argument("--split", default=None, help="Subdirectory of data root (default: the config's train split)")
     parser.add_argument("--frames", type=int, default=None, help="Frames per clip (default: from config)")
-    parser.add_argument("--camera", type=int, default=None, help="Camera index override")
+    parser.add_argument("--camera", default=None,
+                        help="Camera index, device path or stream URL (rtsp://...); "
+                             "default: $SIGNBRIDGE_CAMERA, then the config")
     parser.add_argument("--no-preview", action="store_true", help="Record without a preview window")
     args = parser.parse_args(argv)
 
@@ -76,7 +78,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         layout=layout,
         hand_model_path=config.capture.hand_model_path,
         pose_model_path=config.capture.pose_model_path,
-        camera_index=args.camera if args.camera is not None else config.capture.camera_index,
+        camera_index=resolve_camera(args.camera, config.capture.camera_index),
         width=config.capture.width,
         height=config.capture.height,
         min_hand_detection_confidence=config.capture.min_hand_detection_confidence,

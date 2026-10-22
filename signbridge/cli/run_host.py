@@ -50,13 +50,13 @@ def build_source(args: argparse.Namespace, config: Any) -> LandmarkSource:
     if args.source == "synthetic":
         return SyntheticSource(layout.num_landmarks, count=args.count, fps=args.fps)
 
-    from ..capture.mediapipe_source import MediaPipeSource
+    from ..capture.mediapipe_source import MediaPipeSource, resolve_camera
 
     return MediaPipeSource(
         layout=layout,
         hand_model_path=config.capture.hand_model_path,
         pose_model_path=config.capture.pose_model_path,
-        camera_index=args.camera if args.camera is not None else config.capture.camera_index,
+        camera_index=resolve_camera(args.camera, config.capture.camera_index),
         width=config.capture.width,
         height=config.capture.height,
         min_hand_detection_confidence=config.capture.min_hand_detection_confidence,
@@ -77,7 +77,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--fps", type=float, default=30.0, help="Replay/synthetic frame rate")
     parser.add_argument("--loop", action="store_true", help="Loop replayed clips")
     parser.add_argument("--count", type=int, default=300, help="Frames for --source synthetic")
-    parser.add_argument("--camera", type=int, default=None, help="Camera index override")
+    parser.add_argument("--camera", default=None,
+                        help="Camera index, device path or stream URL (rtsp://...); "
+                             "default: $SIGNBRIDGE_CAMERA, then the config")
     parser.add_argument("--no-preview", action="store_true", help="Do not open a preview window")
     parser.add_argument("--no-speech", action="store_true", help="Print predictions instead of speaking")
     parser.add_argument("--tts-backend", default=None, help="auto, macos_say, pyttsx3 or null")
