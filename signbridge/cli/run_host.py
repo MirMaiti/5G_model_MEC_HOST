@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ..capture.base import LandmarkSource
+from ..capture.mediapipe_source import CameraError
 from ..capture.replay_source import ReplaySource, SyntheticSource
 from ..config import load_config
 from ..host.client import ConnectionFailed, HostClient, SessionStats, run_session
@@ -178,7 +179,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("\nStreaming landmarks. Ctrl-C to stop.\n")
         with source:
             run_session(client, source, on_prediction=on_prediction, on_frame=on_frame, stats=stats)
-    except (ConnectionFailed, FileNotFoundError) as exc:
+    except (CameraError, ConnectionFailed, FileNotFoundError) as exc:
         print(f"\n{exc}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:
