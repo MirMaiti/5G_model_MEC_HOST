@@ -82,6 +82,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                         help="Camera index, device path or stream URL (rtsp://...); "
                              "default: $SIGNBRIDGE_CAMERA, then the config")
     parser.add_argument("--no-preview", action="store_true", help="Do not open a preview window")
+    parser.add_argument("--video-port", type=int, default=0,
+                        help="Serve the annotated camera preview as MJPEG on this port, for the "
+                             "MEC's live web viewer (default: 0, off). Video goes only to browsers "
+                             "that open it; the MEC still receives landmarks only.")
     parser.add_argument("--no-speech", action="store_true", help="Print predictions instead of speaking")
     parser.add_argument("--tts-backend", default=None, help="auto, macos_say, pyttsx3 or null")
     parser.add_argument("--voice", default=None, help="Voice name for the TTS backend")
@@ -95,16 +99,28 @@ def main(argv: Optional[List[str]] = None) -> int:
         overrides["host"] = {"server_host": host, "server_port": int(port) if port else None}
     config = load_config(args.config if Path(args.config).exists() else None, overrides=overrides)
 
+    video = None
+    if args.video_port and args.source == "camera":
+        from ..host.video_server import VideoServer
+
+        try:
+            video = VideoServer(("0.0.0.0", args.video_port), mirrored=config.capture.mirror_preview).start()
+        except OSError as exc:
+            print(f"Camera preview not started: port {args.video_port} is unavailable ({exc}).", file=sys.stderr)
+
     client = HostClient(
         host=config.host.server_host,
         port=config.host.server_port,
         layout=config.layout,
         connect_timeout=config.host.connect_timeout,
+        hello_extra={"video": video.announce()} if video is not None else None,
     )
     try:
         welcome = client.connect()
     except ConnectionFailed as exc:
         print(f"\n{exc}\n", file=sys.stderr)
+        if video is not None:
+            video.stop()
         return 1
 
     print(f"Connected to {config.host.server_host}:{config.host.server_port}")
@@ -112,6 +128,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     print(f"  window {welcome.get('window')} frames, {welcome.get('feature_dim')} features/frame")
     if welcome.get("device"):
         print(f"  server device: {welcome['device']}")
+    if video is not None:
+        print(f"  camera preview: http://<this device's IP>:{video.port}/video.mjpg")
 
     speak = not args.no_speech
     if client.untrained:
@@ -156,8 +174,22 @@ def main(argv: Optional[List[str]] = None) -> int:
             speaker.offer(speakable)
         last_label = label
 
+    def annotate_for_web(image: Any, frame: Any) -> Any:
+        """Skeleton and current label on the web preview frame."""
+        import cv2 as web_cv2
+
+        from ..capture.mediapipe_source import draw_landmarks
+
+        image = draw_landmarks(image, frame.landmarks, frame.mask)
+        text = last_label or "..."
+        web_cv2.putText(image, text, (12, 36), web_cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 0), 4)
+        web_cv2.putText(image, text, (12, 36), web_cv2.FONT_HERSHEY_SIMPLEX, 1.0, (80, 255, 80), 2)
+        return image
+
     def on_frame(frame: Any, stats: SessionStats) -> bool:
         """Draw the preview; return False to stop the session."""
+        if video is not None:
+            video.offer(frame.image, annotate=lambda image: annotate_for_web(image, frame))
         if cv2 is None or frame.image is None:
             return True
         from ..capture.mediapipe_source import draw_landmarks
@@ -189,6 +221,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             cv2.destroyAllWindows()
         if speaker is not None:
             speaker.close()
+        if video is not None:
+            video.stop()
         client.close()
 
     print(

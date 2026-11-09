@@ -54,6 +54,30 @@ def test_snapshot_lists_connected_hosts():
     assert hub.snapshot()["hosts"] == []
 
 
+def test_hosts_carry_their_video_announcement():
+    hub = PredictionHub()
+    watcher = hub.subscribe()
+    hub.host_connected("10.0.0.5:4000", video={"port": 8081, "mirrored": True})
+    assert watcher.get_nowait()["video"] == {"port": 8081, "mirrored": True}
+    assert hub.snapshot()["hosts"][0]["video"]["port"] == 8081
+
+
+def test_landmarks_are_sent_per_hand_with_missing_hands_as_none():
+    import numpy as np
+
+    hub = PredictionHub()
+    watcher = hub.subscribe()
+    landmarks = np.zeros((42, 3), dtype=np.float32)
+    landmarks[21:, 0] = 0.25
+    mask = np.zeros(42, dtype=np.float32)
+    mask[21:] = 1.0
+    hub.publish_landmarks("10.0.0.5:4000", landmarks, mask, seq=7)
+    event = watcher.get_nowait()
+    assert event["type"] == "landmarks" and event["seq"] == 7
+    assert event["hands"][0] is None
+    assert len(event["hands"][1]) == 21 and event["hands"][1][0] == [0.25, 0.0]
+
+
 def test_frame_rate_over_a_sliding_window():
     rate = FrameRate(span_seconds=5.0)
     value = 0.0
@@ -124,7 +148,9 @@ def test_predictions_from_a_capture_host_reach_the_browser(live):
     assert response.getheader("Content-Type") == "text/event-stream"
     assert read_events(response, "status")[0]["hosts"] == []
 
-    client = HostClient("127.0.0.1", server.port, connect_timeout=5.0)
+    client = HostClient(
+        "127.0.0.1", server.port, connect_timeout=5.0, hello_extra={"video": {"port": 8081, "mirrored": False}}
+    )
     client.connect()
     try:
         run_session(client, SyntheticSource(num_landmarks=42, count=30, fps=0), linger_seconds=1.0)
@@ -133,6 +159,8 @@ def test_predictions_from_a_capture_host_reach_the_browser(live):
 
     events = read_events(response, "prediction")
     assert events[0]["type"] == "host" and events[0]["connected"] is True
+    assert events[0]["video"] == {"port": 8081, "mirrored": False}
+    assert any(event["type"] == "landmarks" for event in events)
     prediction = events[-1]
     assert prediction["peer"] == events[0]["peer"]
     assert {"label", "confidence", "fps", "frames_seen", "inference_ms"} <= prediction.keys()

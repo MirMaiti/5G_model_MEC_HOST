@@ -56,6 +56,8 @@ class HostClient:
         layout: Layout name announced in the handshake, so a mismatch is caught
             immediately rather than producing quiet nonsense.
         connect_timeout: Seconds to wait for the connection and handshake.
+        hello_extra: Extra fields for the HELLO message, such as where this
+            host serves its camera preview.
     """
 
     def __init__(
@@ -64,8 +66,10 @@ class HostClient:
         port: int,
         layout: str = "hands",
         connect_timeout: float = 5.0,
+        hello_extra: Optional[Dict[str, Any]] = None,
     ) -> None:
         self.host = host
+        self.hello_extra = dict(hello_extra or {})
         self.port = port
         self.layout = layout
         self.connect_timeout = connect_timeout
@@ -105,10 +109,9 @@ class HostClient:
             ) from exc
 
         connection = Connection(sock)
-        connection.send_json(
-            MessageType.HELLO,
-            {"layout": self.layout, "client": "signbridge-host", "t_ms": time.time() * 1000.0},
-        )
+        hello = dict(self.hello_extra)
+        hello.update({"layout": self.layout, "client": "signbridge-host", "t_ms": time.time() * 1000.0})
+        connection.send_json(MessageType.HELLO, hello)
         try:
             message = connection.read_message()
         except ProtocolError as exc:

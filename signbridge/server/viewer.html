@@ -70,7 +70,27 @@
   .banner.show { display: block; }
 
   .grid { display: grid; gap: 16px; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
-  @media (max-width: 760px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+  @media (max-width: 860px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+  .side { display: grid; gap: 16px; align-content: start; min-width: 0; }
+
+  .camera-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+  .camera-head .label { margin: 0; }
+  .segmented { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .segmented button { border: 0; border-radius: 0; padding: 5px 12px; background: var(--bg); }
+  .segmented button + button { border-left: 1px solid var(--line); }
+  .stage {
+    position: relative; width: 100%; aspect-ratio: 16 / 9; border-radius: 10px; overflow: hidden;
+    background: #0d0e11;
+  }
+  .stage img, .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .stage img { object-fit: contain; }
+  .stage [hidden] { display: none; }
+  .stage-msg {
+    position: absolute; left: 12px; right: 12px; bottom: 12px; padding: 8px 12px; border-radius: 8px;
+    background: rgba(0, 0, 0, 0.6); color: #e8e9ec; font-size: 13px;
+  }
+  .stage-msg:empty { display: none; }
+  .camera-foot { margin: 10px 0 0; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
   .card {
     background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
     padding: 18px 20px; box-shadow: var(--shadow); min-width: 0;
@@ -81,11 +101,11 @@
   }
 
   .sign {
-    font-size: clamp(48px, 11vw, 96px); font-weight: 650; line-height: 1.05;
+    font-size: clamp(44px, 8vw, 76px); font-weight: 650; line-height: 1.05;
     letter-spacing: -0.02em; margin: 6px 0 4px; overflow-wrap: anywhere;
     transition: color 0.2s;
   }
-  .sign.idle { color: var(--muted); font-weight: 400; font-size: clamp(28px, 6vw, 44px); }
+  .sign.idle { color: var(--muted); font-weight: 400; font-size: clamp(24px, 4vw, 34px); }
   .sign.flash { animation: flash 0.6s ease-out; }
   @keyframes flash { from { color: var(--accent); } to { color: var(--ink); } }
   .conf { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
@@ -146,6 +166,23 @@
 
   <div class="grid">
     <section class="card">
+      <div class="camera-head">
+        <p class="label">Camera</p>
+        <div class="segmented" role="group" aria-label="Camera view">
+          <button type="button" id="mode-video" aria-pressed="true">Video</button>
+          <button type="button" id="mode-skeleton" aria-pressed="false">Skeleton</button>
+        </div>
+      </div>
+      <div class="stage" id="stage">
+        <img id="video" alt="Live camera preview from the capture host" hidden />
+        <canvas id="skeleton"></canvas>
+        <div class="stage-msg" id="stage-msg"></div>
+      </div>
+      <p class="camera-foot" id="camera-foot">Skeleton: the 42 hand landmarks the MEC receives, which is all the model ever sees.</p>
+    </section>
+
+    <div class="side">
+    <section class="card">
       <p class="label">Current sign</p>
       <div class="sign idle" id="sign">Waiting for a capture host</div>
       <div class="conf">
@@ -166,6 +203,7 @@
       <p class="label" style="margin-top:18px">Model</p>
       <div id="model" style="font-size:14px;color:var(--muted)">–</div>
     </section>
+    </div>
 
     <section class="card caption-card">
       <div class="caption-head">
@@ -200,6 +238,142 @@
   let lastEventAt = 0;
   const hosts = new Map();
 
+  const HAND_LINKS = [
+    [0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 8],
+    [5, 9], [9, 10], [10, 11], [11, 12], [9, 13], [13, 14], [14, 15], [15, 16],
+    [13, 17], [17, 18], [18, 19], [19, 20], [0, 17],
+  ];
+  const HAND_COLOURS = ["#ffc800", "#00b4ff"];
+  let mode = "video";
+  try { mode = localStorage.getItem("signbridge-view") === "skeleton" ? "skeleton" : "video"; } catch {}
+  let hands = [null, null];
+  let handsAt = 0;
+  let dirty = true;
+  let videoFailedFor = null;
+  let wantVideo = false;
+
+  function currentHost() {
+    return hosts.values().next().value || null;
+  }
+
+  function videoUrl(host) {
+    if (!host || !host.video || !host.peer) return null;
+    const ip = host.peer.slice(0, host.peer.lastIndexOf(":"));
+    return `http://${ip}:${host.video.port}/video.mjpg`;
+  }
+
+  function stageMessage(text) {
+    $("stage-msg").textContent = text || "";
+  }
+
+  function updateStage() {
+    $("mode-video").setAttribute("aria-pressed", String(mode === "video"));
+    $("mode-skeleton").setAttribute("aria-pressed", String(mode === "skeleton"));
+    const host = currentHost();
+    const url = videoUrl(host);
+    const img = $("video");
+    const showVideo = mode === "video" && url && videoFailedFor !== url;
+
+    if (showVideo) {
+      if (img.dataset.url !== url) {
+        wantVideo = true;
+        img.dataset.url = url;
+        img.src = url;
+        stageMessage("Connecting to the camera preview…");
+      }
+      img.hidden = false;
+      $("skeleton").hidden = true;
+      $("camera-foot").textContent = `Video straight from the capture host (${url.replace("/video.mjpg", "")}); it never passes through the MEC.`;
+      return;
+    }
+
+    if (img.dataset.url) {
+      wantVideo = false;
+      delete img.dataset.url;
+      img.removeAttribute("src");
+    }
+    img.hidden = true;
+    $("skeleton").hidden = false;
+    $("camera-foot").textContent = "Skeleton: the 42 hand landmarks the MEC receives, which is all the model ever sees.";
+    dirty = true;
+    if (!host) stageMessage("Waiting for a capture host");
+    else if (mode === "video" && !url) stageMessage("This capture host doesn't serve video (start run_host with --video-port 8081). Showing the skeleton.");
+    else if (mode === "video") stageMessage("Can't reach the camera preview. Showing the skeleton.");
+    else stageMessage("");
+  }
+
+  function setMode(next) {
+    mode = next;
+    videoFailedFor = null;
+    try { localStorage.setItem("signbridge-view", mode); } catch {}
+    updateStage();
+  }
+
+  function drawSkeleton() {
+    requestAnimationFrame(drawSkeleton);
+    const canvas = $("skeleton");
+    if (canvas.hidden) return;
+    const box = canvas.getBoundingClientRect();
+    const ratio = window.devicePixelRatio || 1;
+    const width = Math.round(box.width * ratio);
+    const height = Math.round(box.height * ratio);
+    const stale = handsAt && Date.now() - handsAt > 1500;
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
+      dirty = true;
+    }
+    if (!dirty && !stale) return;
+    dirty = false;
+
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, width, height);
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.06)";
+    ctx.lineWidth = 1;
+    for (let i = 1; i < 8; i += 1) {
+      const x = (width * i) / 8;
+      const y = (height * i) / 8;
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, height); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke();
+    }
+
+    const host = currentHost();
+    const mirrored = !host || !host.video || host.video.mirrored !== false;
+    const live = hands.some(Boolean) && !stale;
+    if (host && !live && !$("stage-msg").textContent) {
+      ctx.fillStyle = "rgba(255, 255, 255, 0.45)";
+      ctx.font = `${Math.round(15 * ratio)}px system-ui, sans-serif`;
+      ctx.textAlign = "center";
+      ctx.fillText("No hands in view", width / 2, height / 2);
+    }
+    if (!live) return;
+    hands.forEach((hand, index) => {
+      if (!hand) return;
+      const points = hand.map(([x, y]) => [(mirrored ? 1 - x : x) * width, y * height]);
+      ctx.strokeStyle = HAND_COLOURS[index];
+      ctx.lineWidth = 3 * ratio;
+      ctx.lineCap = "round";
+      for (const [a, b] of HAND_LINKS) {
+        ctx.beginPath();
+        ctx.moveTo(points[a][0], points[a][1]);
+        ctx.lineTo(points[b][0], points[b][1]);
+        ctx.stroke();
+      }
+      ctx.fillStyle = "#ffffff";
+      for (const [x, y] of points) {
+        ctx.beginPath();
+        ctx.arc(x, y, 3.5 * ratio, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    });
+  }
+
+  function onLandmarks(event) {
+    hands = event.hands || [null, null];
+    handsAt = Date.now();
+    dirty = true;
+  }
+
   const pct = (value) => `${Math.round((value || 0) * 100)}%`;
   const clock = (ms) => new Date(ms || Date.now()).toLocaleTimeString([], { hour12: false });
 
@@ -217,7 +391,9 @@
     if (!list.length) {
       showSign(null, "Waiting for a capture host");
       $("fps").textContent = "–";
+      hands = [null, null];
     }
+    updateStage();
   }
 
   function showSign(label, idleText) {
@@ -292,6 +468,8 @@
   function onHost(event) {
     if (event.connected) {
       hosts.set(event.peer, event);
+      videoFailedFor = null;
+      delete $("video").dataset.url;
       addLog(`Capture host ${event.peer} connected`, "", true, event.time_ms);
       showSign(null, "Listening…");
     } else {
@@ -338,6 +516,7 @@
       if (event.type === "status") onStatus(event);
       else if (event.type === "host") onHost(event);
       else if (event.type === "prediction") onPrediction(event);
+      else if (event.type === "landmarks") onLandmarks(event);
     };
   }
 
@@ -363,6 +542,25 @@
     $("caption").textContent = "";
   });
 
+  // Browsers differ on whether an MJPEG <img> ever fires "load", so watch for
+  // the first decoded frame instead.
+  setInterval(() => {
+    const img = $("video");
+    if (!wantVideo || !img.naturalWidth) return;
+    if ($("stage-msg").textContent) stageMessage("");
+    const aspect = `${img.naturalWidth} / ${img.naturalHeight}`;
+    if ($("stage").style.aspectRatio !== aspect) $("stage").style.aspectRatio = aspect;
+  }, 500);
+  $("video").addEventListener("error", () => {
+    if (!wantVideo) return;
+    videoFailedFor = $("video").dataset.url || null;
+    updateStage();
+  });
+  $("mode-video").addEventListener("click", () => setMode("video"));
+  $("mode-skeleton").addEventListener("click", () => setMode("skeleton"));
+
+  updateStage();
+  requestAnimationFrame(drawSkeleton);
   connect();
 })();
 </script>

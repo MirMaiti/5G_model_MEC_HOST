@@ -33,6 +33,9 @@ PAGE_PATH = Path(__file__).with_name("viewer.html")
 #: browsers do not decide the connection is dead while nobody is signing.
 KEEPALIVE_SECONDS = 15.0
 
+#: Landmarks per hand, in the order every layout starts with.
+HAND_POINTS = 21
+
 #: Events buffered per browser before the oldest are dropped. A stalled tab
 #: must never slow the model down.
 SUBSCRIBER_QUEUE = 256
@@ -77,11 +80,33 @@ class PredictionHub:
             hosts = [dict(host) for host in self._hosts.values()]
         return {"type": "status", "info": self.info, "hosts": hosts, "time_ms": time.time() * 1000.0}
 
-    def host_connected(self, peer: str) -> None:
-        """A capture host opened a session."""
+    def host_connected(self, peer: str, video: Optional[Dict[str, Any]] = None) -> None:
+        """A capture host opened a session.
+
+        Args:
+            peer: ``host:port`` of the capture host.
+            video: Where the host serves its camera preview, as it announced
+                in its HELLO (``{"port": ..., "mirrored": ...}``), if it does.
+        """
+        host = {"peer": peer, "since_ms": time.time() * 1000.0, "video": video}
         with self._lock:
-            self._hosts[peer] = {"peer": peer, "since_ms": time.time() * 1000.0}
-        self.publish({"type": "host", "peer": peer, "connected": True})
+            self._hosts[peer] = host
+        self.publish({"type": "host", "peer": peer, "connected": True, "video": video})
+
+    def publish_landmarks(self, peer: str, landmarks: Any, mask: Any, seq: int) -> None:
+        """Send one frame's hand landmarks, for the skeleton view.
+
+        Each hand is a list of ``[x, y]`` pairs in normalised image
+        coordinates, or ``None`` when that hand was not detected.
+        """
+        hands: List[Optional[List[List[float]]]] = []
+        for hand in range(2):
+            block = slice(hand * HAND_POINTS, (hand + 1) * HAND_POINTS)
+            if float(mask[block].max()) <= 0:
+                hands.append(None)
+            else:
+                hands.append([[round(float(x), 4), round(float(y), 4)] for x, y in landmarks[block, :2]])
+        self.publish({"type": "landmarks", "peer": peer, "seq": seq, "hands": hands})
 
     def host_disconnected(self, peer: str, frames: int) -> None:
         """A capture host went away."""

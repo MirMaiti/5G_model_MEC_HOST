@@ -238,6 +238,21 @@ and it never sends anything to the model. `--view-port` moves it, and
 `--view-port 0` turns it off. Press **Speak words** in the page to have the
 browser read each new sign aloud.
 
+The page's camera panel has two views. **Skeleton** draws the 42 hand
+landmarks the MEC receives, so it always works and shows exactly what the
+model sees. **Video** shows the real camera, with the skeleton and current
+sign drawn on it, when the capture host is started with `--video-port`:
+
+```bash
+python -m signbridge.cli.run_host --server <mec-ip>:9009 --video-port 8081 --no-preview
+```
+
+The host then serves an MJPEG preview on that port and tells the MEC where it
+is, so the page finds it by itself. The video goes straight from the capture
+device to the browser and never passes through the MEC, which still receives
+landmarks only. Frames are only encoded while someone is watching, so a
+headless board pays nothing for the feature when nobody has the page open.
+
 **Browser client, instead of the Python capture host.** A browser can't open
 the raw TCP socket the host uses, so there's a second, independent front door
 onto the same model: a WebSocket bridge, plus a self-contained web page that
@@ -400,6 +415,7 @@ signbridge/
   host/
     client.py          the TCP client and session loop
     tts.py             speech backends and the gating rules
+    video_server.py    optional MJPEG camera preview for the live viewer
 
   cli/               collect, train, serve, serve_ws, run_host, fetch_models
 

@@ -60,6 +60,7 @@ class _Handler(socketserver.BaseRequestHandler):
         session = InferenceSession(self.server.predictor, self.server.session_config)
         self._rate = FrameRate()
         self._peer = str(peer)
+        self._video = None
         hub = self.server.hub
         announced = False
         logger.info("Host connected: %s", peer)
@@ -67,7 +68,7 @@ class _Handler(socketserver.BaseRequestHandler):
             if not self._handshake(connection, session):
                 return
             if hub is not None:
-                hub.host_connected(self._peer)
+                hub.host_connected(self._peer, video=self._video)
                 announced = True
             self._serve(connection, session)
         except ProtocolError as exc:
@@ -96,6 +97,8 @@ class _Handler(socketserver.BaseRequestHandler):
             return False
 
         hello = decode_json(payload)
+        video = hello.get("video")
+        self._video = video if isinstance(video, dict) and isinstance(video.get("port"), int) else None
         expected = session.extractor.layout
         claimed = hello.get("layout")
         if claimed is not None and claimed != expected.name:
@@ -146,6 +149,9 @@ class _Handler(socketserver.BaseRequestHandler):
         """Decode one frame, buffer it, and reply if a prediction came due."""
         seq, t_ms, landmarks, mask = decode_frame(payload)
         fps = self._rate.tick()
+        hub = self.server.hub
+        if hub is not None and hub.watchers:
+            hub.publish_landmarks(self._peer, landmarks, mask, seq)
         if landmarks.shape[0] != expected_landmarks:
             self._try_error(
                 connection,
