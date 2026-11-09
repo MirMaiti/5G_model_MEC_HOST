@@ -228,6 +228,16 @@ and the speech output without a signer:
 python -m signbridge.cli.run_host --source replay --clips data/train/hello --fps 30
 ```
 
+**Live web viewer.** `signbridge.cli.serve` also serves a read-only page on
+port 8000 that shows what the server is recognising from whichever capture
+host is connected (the UNO Q, a laptop, a replay): the current sign and its
+confidence, a running caption, frames per second arriving and model time.
+Open `http://<mec-ip>:8000/` from any laptop or phone that can reach the MEC.
+It loads nothing from the internet, so it works on an isolated lab network,
+and it never sends anything to the model. `--view-port` moves it, and
+`--view-port 0` turns it off. Press **Speak words** in the page to have the
+browser read each new sign aloud.
+
 **Browser client, instead of the Python capture host.** A browser can't open
 the raw TCP socket the host uses, so there's a second, independent front door
 onto the same model: a WebSocket bridge, plus a self-contained web page that
@@ -385,6 +395,7 @@ signbridge/
     session.py         per-connection buffer and smoothing
     tcp_server.py      the threaded TCP server, for the Python capture host
     ws_server.py        the WebSocket bridge, for the browser web UI
+    viewer.py, .html    read-only live page served alongside the TCP server
 
   host/
     client.py          the TCP client and session loop

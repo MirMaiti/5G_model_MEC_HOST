@@ -23,8 +23,11 @@ from ..config import load_config
 from ..server.predictor import TorchPredictor, UntrainedPredictor
 from ..server.session import session_config_from
 from ..server.tcp_server import SignBridgeServer
+from ..server.viewer import PredictionHub, ViewerServer
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_VIEW_PORT = 8000
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -35,6 +38,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--host", default=None, help="Bind address override")
     parser.add_argument("--port", type=int, default=None, help="Bind port override")
     parser.add_argument("--device", default=None, help="Force a device, e.g. cpu, mps, cuda")
+    parser.add_argument(
+        "--view-port",
+        type=int,
+        default=DEFAULT_VIEW_PORT,
+        help=f"Port for the live web viewer (default: {DEFAULT_VIEW_PORT}; 0 turns it off)",
+    )
     parser.add_argument(
         "--smoke-test",
         action="store_true",
@@ -73,12 +82,25 @@ def main(argv: Optional[List[str]] = None) -> int:
             print("    python -m signbridge.cli.serve --smoke-test", file=sys.stderr)
             return 1
 
+    hub = PredictionHub() if args.view_port else None
+    if hub is not None:
+        hub.info = predictor.info()
+
     server = SignBridgeServer(
         address=(config.server.host, config.server.port),
         predictor=predictor,
         session_config=session_config_from(config.server),
         max_connections=config.server.max_connections,
+        hub=hub,
     )
+
+    viewer = None
+    if hub is not None:
+        try:
+            viewer = ViewerServer((config.server.host, args.view_port), hub).start()
+        except OSError as exc:
+            print(f"Live viewer not started: port {args.view_port} is unavailable ({exc}).", file=sys.stderr)
+            print("Pick another with --view-port, or 0 to turn it off.", file=sys.stderr)
 
     info = predictor.info()
     print(f"SignBridge server listening on {config.server.host}:{server.port}")
@@ -87,6 +109,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     print(f"  features: {info['feature_dim']} per frame, window {info['window']} frames")
     if "device" in info:
         print(f"  device: {info['device']}")
+    if viewer is not None:
+        print(f"  live viewer: http://<this machine's IP>:{viewer.port}/")
     print("\nCtrl-C to stop.\n")
     # Redirected stdout is block-buffered; flush so an operator tailing a log
     # file sees what the server is serving before the first host connects.
@@ -97,6 +121,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     except KeyboardInterrupt:
         print(f"\nStopping. {server.stats()}")
     finally:
+        if viewer is not None:
+            viewer.stop()
         server.shutdown()
         server.server_close()
     return 0

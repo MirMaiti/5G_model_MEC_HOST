@@ -27,5 +27,8 @@ signbridge-fetch-models = "signbridge.cli.fetch_models:main"
 [tool.setuptools.packages.find]
 include = ["signbridge*"]
 
+[tool.setuptools.package-data]
+"signbridge.server" = ["viewer.html"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

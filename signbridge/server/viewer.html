@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SignBridge Live</title>
+<!--
+  Read-only live view of the MEC server, served by `python -m signbridge.cli.serve`
+  at http://<mec>:8000/. Events arrive over Server-Sent Events from /events.
+  Deliberately loads nothing from the internet: the lab network may have none.
+-->
+<style>
+  :root {
+    --bg: #f6f5f2;
+    --panel: #ffffff;
+    --ink: #1c1d21;
+    --muted: #6b6e76;
+    --line: #e3e1dc;
+    --accent: #2f6fdb;
+    --accent-soft: #e4ecfb;
+    --good: #1f8a4c;
+    --warn: #b7791f;
+    --bad: #c2413a;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 4px 16px rgba(0, 0, 0, 0.04);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #121317;
+      --panel: #1b1d23;
+      --ink: #ecedf0;
+      --muted: #9a9ea8;
+      --line: #2c2f37;
+      --accent: #6b9cf5;
+      --accent-soft: #233150;
+      --good: #4cc27f;
+      --warn: #e0a84a;
+      --bad: #ef6b63;
+      --shadow: none;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 20px 16px 40px; }
+  header {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px;
+    justify-content: space-between; margin-bottom: 18px;
+  }
+  h1 { font-size: 20px; margin: 0; letter-spacing: -0.01em; }
+  h1 span { color: var(--muted); font-weight: 400; }
+  .pills { display: flex; flex-wrap: wrap; gap: 8px; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 4px 11px; border-radius: 999px; font-size: 13px;
+    background: var(--panel); border: 1px solid var(--line); color: var(--muted);
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .dot.good { background: var(--good); }
+  .dot.warn { background: var(--warn); }
+  .dot.bad { background: var(--bad); }
+
+  .banner {
+    display: none; margin-bottom: 16px; padding: 10px 14px; border-radius: 10px;
+    background: var(--accent-soft); color: var(--ink); font-size: 14px;
+  }
+  .banner.show { display: block; }
+
+  .grid { display: grid; gap: 16px; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+  @media (max-width: 760px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    padding: 18px 20px; box-shadow: var(--shadow); min-width: 0;
+  }
+  .label {
+    font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--muted); margin: 0 0 8px;
+  }
+
+  .sign {
+    font-size: clamp(48px, 11vw, 96px); font-weight: 650; line-height: 1.05;
+    letter-spacing: -0.02em; margin: 6px 0 4px; overflow-wrap: anywhere;
+    transition: color 0.2s;
+  }
+  .sign.idle { color: var(--muted); font-weight: 400; font-size: clamp(28px, 6vw, 44px); }
+  .sign.flash { animation: flash 0.6s ease-out; }
+  @keyframes flash { from { color: var(--accent); } to { color: var(--ink); } }
+  .conf { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+  .bar { flex: 1; height: 8px; border-radius: 99px; background: var(--line); overflow: hidden; }
+  .bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width 0.25s; }
+  .conf b { font-variant-numeric: tabular-nums; min-width: 4.5ch; text-align: right; font-weight: 600; }
+
+  .top { list-style: none; margin: 16px 0 0; padding: 0; display: grid; gap: 6px; }
+  .top li { display: grid; grid-template-columns: 9ch minmax(0, 1fr) 5ch; align-items: center; gap: 10px; font-size: 14px; }
+  .top li span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .top .bar { height: 5px; }
+  .top .bar > i { background: var(--muted); }
+  .top li span:last-child { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  .stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 18px; }
+  .stat b { display: block; font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .stat span { font-size: 13px; color: var(--muted); }
+
+  .caption-card { grid-column: 1 / -1; }
+  .caption-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+  .caption {
+    font-size: clamp(22px, 4vw, 30px); min-height: 1.6em; margin: 8px 0 0;
+    overflow-wrap: anywhere;
+  }
+  .caption:empty::before { content: "Recognised signs will appear here."; color: var(--muted); font-size: 18px; }
+  .buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+  button {
+    font: inherit; font-size: 14px; padding: 6px 14px; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--bg); color: var(--ink);
+  }
+  button:hover { border-color: var(--muted); }
+  button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  .log-card { grid-column: 1 / -1; }
+  .log { list-style: none; margin: 0; padding: 0; max-height: 260px; overflow-y: auto; font-size: 14px; }
+  .log li {
+    display: grid; grid-template-columns: 9ch minmax(0, 1fr) auto; gap: 12px;
+    padding: 6px 0; border-top: 1px solid var(--line);
+  }
+  .log li:first-child { border-top: 0; }
+  .log time, .log .meta { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .log .sys { color: var(--muted); font-style: italic; }
+  .log:empty::before { content: "Nothing yet."; color: var(--muted); }
+  footer { margin-top: 18px; color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>SignBridge <span>live from the MEC</span></h1>
+    <div class="pills">
+      <span class="pill" id="link-pill"><i class="dot" id="link-dot"></i><span id="link-text">Connecting…</span></span>
+      <span class="pill"><i class="dot" id="host-dot"></i><span id="host-text">No capture host</span></span>
+    </div>
+  </header>
+
+  <div class="banner" id="untrained">This server is running an untrained model (smoke test). Its predictions are meaningless.</div>
+
+  <div class="grid">
+    <section class="card">
+      <p class="label">Current sign</p>
+      <div class="sign idle" id="sign">Waiting for a capture host</div>
+      <div class="conf">
+        <div class="bar"><i id="conf-bar"></i></div>
+        <b id="conf-text">–</b>
+      </div>
+      <ul class="top" id="top"></ul>
+    </section>
+
+    <section class="card">
+      <p class="label">Link</p>
+      <div class="stats">
+        <div class="stat"><b id="fps">–</b><span>frames/s arriving</span></div>
+        <div class="stat"><b id="infer">–</b><span>model time (ms)</span></div>
+        <div class="stat"><b id="frames">–</b><span>frames this session</span></div>
+        <div class="stat"><b id="preds">0</b><span>predictions seen</span></div>
+      </div>
+      <p class="label" style="margin-top:18px">Model</p>
+      <div id="model" style="font-size:14px;color:var(--muted)">–</div>
+    </section>
+
+    <section class="card caption-card">
+      <div class="caption-head">
+        <p class="label" style="margin:0">Caption</p>
+        <div class="buttons">
+          <button id="speak" aria-pressed="false" type="button">Speak words</button>
+          <button id="clear" type="button">Clear</button>
+        </div>
+      </div>
+      <p class="caption" id="caption"></p>
+    </section>
+
+    <section class="card log-card">
+      <p class="label">Log</p>
+      <ul class="log" id="log"></ul>
+    </section>
+  </div>
+
+  <footer>View only: this page watches the server and never sends anything to the model.</footer>
+</div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const MAX_LOG = 200;
+  const MAX_WORDS = 40;
+  const STALE_MS = 4000;
+
+  let words = [];
+  let predictions = 0;
+  let speaking = false;
+  let lastEventAt = 0;
+  const hosts = new Map();
+
+  const pct = (value) => `${Math.round((value || 0) * 100)}%`;
+  const clock = (ms) => new Date(ms || Date.now()).toLocaleTimeString([], { hour12: false });
+
+  function setLink(state, text) {
+    $("link-dot").className = "dot " + state;
+    $("link-text").textContent = text;
+  }
+
+  function renderHosts() {
+    const list = [...hosts.keys()];
+    $("host-dot").className = "dot " + (list.length ? "good" : "");
+    $("host-text").textContent = list.length
+      ? "Capture host " + [...new Set(list.map((peer) => peer.split(":")[0]))].join(", ")
+      : "No capture host";
+    if (!list.length) {
+      showSign(null, "Waiting for a capture host");
+      $("fps").textContent = "–";
+    }
+  }
+
+  function showSign(label, idleText) {
+    const el = $("sign");
+    if (label) {
+      if (el.textContent !== label || el.classList.contains("idle")) {
+        el.classList.remove("flash");
+        void el.offsetWidth;
+        el.classList.add("flash");
+      }
+      el.textContent = label;
+      el.classList.remove("idle");
+    } else {
+      el.textContent = idleText;
+      el.classList.add("idle");
+      el.classList.remove("flash");
+    }
+  }
+
+  function renderTop(top) {
+    const entries = Object.entries(top || {}).sort((a, b) => b[1] - a[1]).slice(0, 3);
+    $("top").replaceChildren(...entries.map(([name, value]) => {
+      const li = document.createElement("li");
+      const label = document.createElement("span");
+      label.textContent = name;
+      label.title = name;
+      const bar = document.createElement("div");
+      bar.className = "bar";
+      const fill = document.createElement("i");
+      fill.style.width = pct(value);
+      bar.append(fill);
+      const num = document.createElement("span");
+      num.textContent = pct(value);
+      li.append(label, bar, num);
+      return li;
+    }));
+  }
+
+  function addLog(text, meta, system, time) {
+    const li = document.createElement("li");
+    const when = document.createElement("time");
+    when.textContent = clock(time);
+    const what = document.createElement("span");
+    what.textContent = text;
+    if (system) what.className = "sys";
+    const extra = document.createElement("span");
+    extra.className = "meta";
+    extra.textContent = meta || "";
+    li.append(when, what, extra);
+    const log = $("log");
+    log.prepend(li);
+    while (log.children.length > MAX_LOG) log.lastChild.remove();
+  }
+
+  function say(text) {
+    if (!speaking || !("speechSynthesis" in window)) return;
+    window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+  }
+
+  function onStatus(event) {
+    const info = event.info || {};
+    const labels = info.labels || [];
+    $("model").textContent = labels.length
+      ? `${labels.length} signs · window ${info.window} frames${info.device ? " · " + info.device : ""}`
+      : "–";
+    $("untrained").classList.toggle("show", !!info.untrained);
+    hosts.clear();
+    for (const host of event.hosts || []) hosts.set(host.peer, host);
+    renderHosts();
+  }
+
+  function onHost(event) {
+    if (event.connected) {
+      hosts.set(event.peer, event);
+      addLog(`Capture host ${event.peer} connected`, "", true, event.time_ms);
+      showSign(null, "Listening…");
+    } else {
+      hosts.delete(event.peer);
+      addLog(`Capture host ${event.peer} disconnected`, `${event.frames ?? 0} frames`, true, event.time_ms);
+    }
+    renderHosts();
+  }
+
+  function onPrediction(event) {
+    predictions += 1;
+    $("preds").textContent = predictions;
+    $("fps").textContent = event.fps ? event.fps.toFixed(1) : "–";
+    $("infer").textContent = event.inference_ms != null ? Math.round(event.inference_ms) : "–";
+    $("frames").textContent = event.frames_seen ?? "–";
+    if (!hosts.has(event.peer)) {
+      hosts.set(event.peer, { peer: event.peer });
+      renderHosts();
+    }
+
+    const hasHands = event.raw_label !== "";
+    showSign(event.label, hasHands ? "Signing…" : "No hands in view");
+    $("conf-bar").style.width = hasHands ? pct(event.confidence) : "0%";
+    $("conf-text").textContent = hasHands ? pct(event.confidence) : "–";
+    renderTop(hasHands ? event.top : {});
+
+    if (event.changed && event.label) {
+      words.push(event.label);
+      if (words.length > MAX_WORDS) words = words.slice(-MAX_WORDS);
+      $("caption").textContent = words.join(" ");
+      addLog(event.label, `${pct(event.confidence)} · ${Math.round(event.inference_ms || 0)} ms`, false, event.time_ms);
+      say(event.label);
+    }
+  }
+
+  function connect() {
+    const source = new EventSource("events");
+    source.onopen = () => setLink("good", "Live");
+    source.onerror = () => setLink("warn", "Reconnecting…");
+    source.onmessage = (message) => {
+      let event;
+      try { event = JSON.parse(message.data); } catch { return; }
+      lastEventAt = Date.now();
+      if (event.type === "status") onStatus(event);
+      else if (event.type === "host") onHost(event);
+      else if (event.type === "prediction") onPrediction(event);
+    };
+  }
+
+  setInterval(() => {
+    if (hosts.size && lastEventAt && Date.now() - lastEventAt > STALE_MS) {
+      $("fps").textContent = "0";
+    }
+  }, 1000);
+
+  $("speak").addEventListener("click", () => {
+    speaking = !speaking;
+    $("speak").setAttribute("aria-pressed", String(speaking));
+    if (!("speechSynthesis" in window)) {
+      addLog("This browser has no text-to-speech", "", true);
+    } else if (speaking) {
+      say("Speech on");
+    } else {
+      window.speechSynthesis.cancel();
+    }
+  });
+  $("clear").addEventListener("click", () => {
+    words = [];
+    $("caption").textContent = "";
+  });
+
+  connect();
+})();
+</script>
+</body>
+</html>

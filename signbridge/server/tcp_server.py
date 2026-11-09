@@ -30,6 +30,7 @@ from ..protocol import (
 )
 from .predictor import Predictor
 from .session import InferenceSession, SessionConfig
+from .viewer import FrameRate, PredictionHub
 
 logger = logging.getLogger(__name__)
 
@@ -57,10 +58,17 @@ class _Handler(socketserver.BaseRequestHandler):
             return
 
         session = InferenceSession(self.server.predictor, self.server.session_config)
+        self._rate = FrameRate()
+        self._peer = str(peer)
+        hub = self.server.hub
+        announced = False
         logger.info("Host connected: %s", peer)
         try:
             if not self._handshake(connection, session):
                 return
+            if hub is not None:
+                hub.host_connected(self._peer)
+                announced = True
             self._serve(connection, session)
         except ProtocolError as exc:
             logger.warning("Protocol error from %s: %s", peer, exc)
@@ -72,6 +80,8 @@ class _Handler(socketserver.BaseRequestHandler):
         finally:
             self.server.release_slot()
             connection.close()
+            if announced:
+                hub.host_disconnected(self._peer, session.frames_seen)
             logger.info("Host disconnected: %s (%d frames)", peer, session.frames_seen)
 
     def _handshake(self, connection: Connection, session: InferenceSession) -> bool:
@@ -135,6 +145,7 @@ class _Handler(socketserver.BaseRequestHandler):
     ) -> None:
         """Decode one frame, buffer it, and reply if a prediction came due."""
         seq, t_ms, landmarks, mask = decode_frame(payload)
+        fps = self._rate.tick()
         if landmarks.shape[0] != expected_landmarks:
             self._try_error(
                 connection,
@@ -155,6 +166,10 @@ class _Handler(socketserver.BaseRequestHandler):
         result.update({"seq": seq, "capture_t_ms": t_ms, "server_t_ms": time.time() * 1000.0})
         connection.send_json(MessageType.PREDICTION, result)
         self.server.note_prediction()
+        if self.server.hub is not None:
+            event = dict(result)
+            event.update({"type": "prediction", "peer": self._peer, "fps": round(fps, 2)})
+            self.server.hub.publish(event)
 
     def _try_error(self, connection: Connection, message: str) -> None:
         """Send an ERROR, ignoring a peer that has already gone."""
@@ -172,6 +187,8 @@ class SignBridgeServer(socketserver.ThreadingTCPServer):
         predictor: The shared model wrapper.
         session_config: Buffering and smoothing settings for each connection.
         max_connections: Refuse further hosts beyond this many.
+        hub: Optional :class:`~signbridge.server.viewer.PredictionHub` that
+            every prediction is also published to, for the live web viewer.
     """
 
     allow_reuse_address = True
@@ -183,8 +200,10 @@ class SignBridgeServer(socketserver.ThreadingTCPServer):
         predictor: Predictor,
         session_config: Optional[SessionConfig] = None,
         max_connections: int = 8,
+        hub: Optional[PredictionHub] = None,
     ) -> None:
         self.predictor = predictor
+        self.hub = hub
         self.session_config = session_config or SessionConfig()
         self.max_connections = max(1, max_connections)
         self._active = 0
